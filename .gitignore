@@ -11,6 +11,7 @@
 !.gersemirc
 !.gitignore
 !buildspec.json
+!dev-install.sh
 !CMakeLists.txt
 !CMakePresets.json
 !LICENSE
@@ -24,3 +25,6 @@
 
 # Exclude CMake build number cache
 /cmake/.CMakeBuildNumber
+
+# Claude cleanup folder (ลบทิ้งได้เลย)
+_to_delete/

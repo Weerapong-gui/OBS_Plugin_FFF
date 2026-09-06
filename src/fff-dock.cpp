@@ -56,3 +56,8 @@ extern "C" void fff_register_dock(void)
 
 	obs_frontend_add_dock_by_id("fff_dock", "FFF Control", dock);
 }
+
+extern "C" void fff_unregister_dock(void)
+{
+	obs_frontend_remove_dock("fff_dock");
+}

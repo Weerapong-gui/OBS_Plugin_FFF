@@ -34,6 +34,11 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/tint-filter.c src/fff-dock.cpp)
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/tint-filter.c)
+
+if(ENABLE_QT AND ENABLE_FRONTEND_API)
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/fff-dock.cpp)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE FFF_ENABLE_DOCK)
+endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
