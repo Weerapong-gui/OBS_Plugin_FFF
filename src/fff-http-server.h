@@ -65,6 +65,7 @@ private:
 		   const QByteArray &body);
 	void handleAuth(QTcpSocket *socket, const QByteArray &body);
 	void handleVote(QTcpSocket *socket, const QByteArray &body);
+	void handleLayout(QTcpSocket *socket, const QByteArray &body);
 	void startSse(QTcpSocket *socket, const QString &token, bool overlay);
 	void pushState();
 	void sendHeartbeat();

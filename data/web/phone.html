@@ -17,7 +17,7 @@
 
 <div id="vote" class="hidden">
   <div class="card who">
-    <img id="face" alt="" />
+    <div class="face"><img id="face" alt="" /></div>
     <div>
       <div id="name" class="name"></div>
       <div id="school" class="school"></div>
@@ -80,10 +80,13 @@ function paint(state) {
   const face = el("face");
   if (state.you.photoUrl) {
     if (face.getAttribute("src") !== state.you.photoUrl) face.src = state.you.photoUrl;
-    face.className = "";
+    face.hidden = false;
+    // Same framing formula the dock previewed and the overlay uses.
+    face.style.transform =
+      `translate(${state.you.photoX || 0}%, ${state.you.photoY || 0}%) scale(${state.you.photoZoom || 1})`;
   } else {
     face.removeAttribute("src");
-    face.className = "noface";
+    face.hidden = true;
   }
 
   el("red").classList.toggle("picked", desired === "red");

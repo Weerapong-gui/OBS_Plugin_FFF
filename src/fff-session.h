@@ -22,6 +22,22 @@ struct FffPresident {
 	QString school;
 	QString photo;
 	QString pin;
+
+	// Non-destructive framing: the original file is never touched. Both the
+	// dock preview and the CSS apply these as
+	//   object-fit: cover; transform: translate(photoX%, photoY%) scale(photoZoom)
+	// so what the operator frames is what goes on air.
+	double photoZoom = 1.0; // 1.0 - 4.0
+	double photoX = 0.0;    // pan, percent of the frame, +-(zoom-1)/2*100
+	double photoY = 0.0;
+};
+
+// Where the board sits on the 1920x1080 canvas. x/y are the centre of the
+// board as a fraction of the canvas.
+struct FffLayout {
+	double x = 0.5;
+	double y = 0.5;
+	double scale = 1.0;
 };
 
 /*
@@ -56,6 +72,9 @@ public:
 	quint16 port() const { return m_port; }
 	void setPort(quint16 port);
 
+	FffLayout layout() const { return m_layout; }
+	void setLayout(const FffLayout &layout);
+
 	QString photosDir() const;
 	QString photoPath(const FffPresident &president) const;
 	QString photoUrl(const FffPresident &president) const;
@@ -77,7 +96,6 @@ signals:
 	void changed();
 
 private:
-	void maybeAutoReveal();
 	QString configDir() const;
 
 	QVector<FffPresident> m_presidents;
@@ -85,4 +103,5 @@ private:
 	FffPhase m_phase = FffPhase::Collecting;
 	int m_round = 1;
 	quint16 m_port = 9779;
+	FffLayout m_layout;
 };

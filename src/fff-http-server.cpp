@@ -271,8 +271,21 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendWebFile(socket, QStringLiteral("overlay.html"), "text/html; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/monitor")) {
+			// Shows the flags before they go on air, same as the overlay feed.
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "monitor is local only");
+				return;
+			}
+			sendWebFile(socket, QStringLiteral("monitor.html"), "text/html; charset=utf-8");
+			return;
+		}
 		if (path == QLatin1String("/app.css")) {
 			sendWebFile(socket, QStringLiteral("app.css"), "text/css; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/board.js")) {
+			sendWebFile(socket, QStringLiteral("board.js"), "application/javascript; charset=utf-8");
 			return;
 		}
 		if (path == QLatin1String("/api/events/overlay")) {
@@ -304,6 +317,14 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		}
 		if (path == QLatin1String("/api/vote")) {
 			handleVote(socket, body);
+			return;
+		}
+		if (path == QLatin1String("/api/layout")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "layout is local only");
+				return;
+			}
+			handleLayout(socket, body);
 			return;
 		}
 	}
@@ -357,6 +378,21 @@ void FffHttpServer::handleVote(QTcpSocket *socket, const QByteArray &body)
 	}
 
 	sendJson(socket, 200, m_session->phoneStateJson(presidentId));
+}
+
+void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
+{
+	const QJsonObject request = QJsonDocument::fromJson(body).object();
+	FffLayout layout = m_session->layout();
+	if (request.contains(QStringLiteral("x")))
+		layout.x = request.value(QStringLiteral("x")).toDouble(layout.x);
+	if (request.contains(QStringLiteral("y")))
+		layout.y = request.value(QStringLiteral("y")).toDouble(layout.y);
+	if (request.contains(QStringLiteral("scale")))
+		layout.scale = request.value(QStringLiteral("scale")).toDouble(layout.scale);
+
+	m_session->setLayout(layout);
+	sendJson(socket, 200, "{\"ok\":true}");
 }
 
 void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay)

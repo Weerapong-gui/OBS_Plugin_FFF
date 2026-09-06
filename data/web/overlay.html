@@ -7,101 +7,37 @@
 </head>
 <body class="overlay">
 
-<div class="board-head">
-  <div class="title">ผลการออกธง</div>
-  <div id="meta" class="meta"></div>
+<div id="wrap" class="board-wrap" hidden>
+  <div class="board-head">
+    <div class="title">ผลการออกธง</div>
+    <div id="meta" class="meta"></div>
+  </div>
+  <div id="board" class="board"></div>
 </div>
 
-<div id="board" class="board"></div>
-<div id="warn" class="warn hidden">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
-
+<script src="/board.js"></script>
 <script>
+const wrap = document.getElementById("wrap");
 const board = document.getElementById("board");
 const meta = document.getElementById("meta");
-const warn = document.getElementById("warn");
-const slots = new Map();
 let lastPhase = null;
 
-function buildSlot() {
-  const root = document.createElement("div");
-  const face = document.createElement("img");
-  const name = document.createElement("div");
-  const school = document.createElement("div");
-  const result = document.createElement("div");
-  name.className = "name";
-  school.className = "school";
-  result.className = "result";
-  root.append(face, name, school, result);
-  return { root: root, face: face, name: name, school: school };
-}
-
-// Slots are reused across updates: rebuilding the grid on every vote would
-// restart the photo loads and flicker on air.
 function render(state) {
-  meta.textContent = state.phase === "revealed"
-    ? `รอบ ${state.round}`
-    : `รอบ ${state.round} · ส่งแล้ว ${state.voted}/${state.total}`;
-
   const revealed = state.phase === "revealed";
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
 
-  const seen = new Set();
-  for (const president of state.presidents) {
-    let slot = slots.get(president.id);
-    if (!slot) {
-      slot = buildSlot();
-      slots.set(president.id, slot);
-    }
-    seen.add(president.id);
+  // Nothing at all on air until the operator says so.
+  wrap.hidden = !revealed;
+  if (!revealed) return;
 
-    if (slot.name.textContent !== president.name) slot.name.textContent = president.name;
-    if (slot.school.textContent !== president.school) slot.school.textContent = president.school;
-
-    if (president.photoUrl) {
-      if (slot.face.getAttribute("src") !== president.photoUrl) slot.face.src = president.photoUrl;
-      slot.face.className = "";
-    } else {
-      slot.face.removeAttribute("src");
-      slot.face.className = "noface";
-    }
-
-    let state_class = "slot ";
-    if (!revealed) {
-      state_class += president.vote === "none" ? "waiting" : "pending";
-    } else {
-      state_class += president.vote === "none" ? "missing" : president.vote;
-    }
-    if (slot.root.className !== state_class) slot.root.className = state_class;
-
-    if (justRevealed) {
-      slot.root.classList.remove("reveal-in");
-      void slot.root.offsetWidth;
-      slot.root.classList.add("reveal-in");
-    }
-
-    board.appendChild(slot.root);
-  }
-
-  for (const [id, slot] of slots) {
-    if (!seen.has(id)) {
-      slot.root.remove();
-      slots.delete(id);
-    }
-  }
+  applyLayout(wrap, state.layout);
+  meta.textContent = `รอบ ${state.round}`;
+  renderBoard(board, state, { revealed: true, justRevealed: justRevealed });
 }
 
-function listen() {
-  const stream = new EventSource("/api/events/overlay");
-  stream.onopen = () => warn.classList.add("hidden");
-  stream.onerror = () => warn.classList.remove("hidden");
-  stream.onmessage = (event) => {
-    warn.classList.add("hidden");
-    render(JSON.parse(event.data));
-  };
-}
-
-listen();
+const stream = new EventSource("/api/events/overlay");
+stream.onmessage = (event) => render(JSON.parse(event.data));
 </script>
 </body>
 </html>

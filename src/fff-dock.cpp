@@ -5,21 +5,27 @@ GPL-2.0-or-later
 */
 
 #include "fff-http-server.h"
+#include "fff-photo-editor.h"
 #include "fff-session.h"
 
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <plugin-support.h>
 
+#include <QClipboard>
 #include <QFileDialog>
 #include <QGroupBox>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QTableWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -27,11 +33,14 @@ namespace {
 
 enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColPhoto = 3 };
 
+constexpr int kVisibleRows = 6;
+
 }
 
 /*
  * Operator console: set the presidents up before the event, then drive the
- * rounds from the three buttons at the bottom.
+ * rounds from the buttons at the bottom. Nothing reaches the stream until
+ * "แสดงผลขึ้นจอ" is pressed.
  */
 class FffDock : public QWidget {
 public:
@@ -43,11 +52,13 @@ private:
 	void refreshTable();
 	void refreshLive();
 
+	void addUrlRow(const QString &label, const QString &url);
 	QString selectedPresidentId() const;
 	void toggleServer();
 	void addPresident();
 	void removeSelected();
 	void choosePhoto();
+	void adjustPhoto();
 	void regeneratePin();
 
 	FffSession *m_session = nullptr;
@@ -56,10 +67,12 @@ private:
 	QSpinBox *m_port = nullptr;
 	QPushButton *m_serverButton = nullptr;
 	QLabel *m_serverStatus = nullptr;
-	QLabel *m_addresses = nullptr;
+	QWidget *m_urls = nullptr;
+	QVBoxLayout *m_urlLayout = nullptr;
 
 	QTableWidget *m_table = nullptr;
 	QLabel *m_summary = nullptr;
+	QLabel *m_layoutLabel = nullptr;
 	QListWidget *m_live = nullptr;
 	QPushButton *m_revealButton = nullptr;
 
@@ -92,9 +105,20 @@ FffDock::FffDock()
 
 void FffDock::buildUi()
 {
-	auto *root = new QVBoxLayout(this);
+	// The roster table wants to be tall; a scroll area keeps it from
+	// squeezing the panels above and below it in a narrow dock.
+	auto *outer = new QVBoxLayout(this);
+	outer->setContentsMargins(0, 0, 0, 0);
+	auto *scroll = new QScrollArea(this);
+	scroll->setWidgetResizable(true);
+	scroll->setFrameShape(QFrame::NoFrame);
+	outer->addWidget(scroll);
 
-	auto *serverBox = new QGroupBox(QStringLiteral("เซิร์ฟเวอร์"), this);
+	auto *page = new QWidget(scroll);
+	scroll->setWidget(page);
+	auto *root = new QVBoxLayout(page);
+
+	auto *serverBox = new QGroupBox(QStringLiteral("เซิร์ฟเวอร์"), page);
 	auto *serverLayout = new QVBoxLayout(serverBox);
 
 	auto *portRow = new QHBoxLayout();
@@ -111,14 +135,14 @@ void FffDock::buildUi()
 	m_serverStatus->setWordWrap(true);
 	serverLayout->addWidget(m_serverStatus);
 
-	m_addresses = new QLabel(serverBox);
-	m_addresses->setWordWrap(true);
-	m_addresses->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	serverLayout->addWidget(m_addresses);
+	m_urls = new QWidget(serverBox);
+	m_urlLayout = new QVBoxLayout(m_urls);
+	m_urlLayout->setContentsMargins(0, 0, 0, 0);
+	serverLayout->addWidget(m_urls);
 
 	root->addWidget(serverBox);
 
-	auto *rosterBox = new QGroupBox(QStringLiteral("รายชื่อนายก"), this);
+	auto *rosterBox = new QGroupBox(QStringLiteral("รายชื่อนายก"), page);
 	auto *rosterLayout = new QVBoxLayout(rosterBox);
 
 	m_table = new QTableWidget(0, 4, rosterBox);
@@ -129,22 +153,26 @@ void FffDock::buildUi()
 	m_table->verticalHeader()->setVisible(false);
 	m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
 	m_table->setSelectionMode(QAbstractItemView::SingleSelection);
+	m_table->setMinimumHeight(m_table->verticalHeader()->defaultSectionSize() * kVisibleRows +
+				  m_table->horizontalHeader()->sizeHint().height() + 4);
 	rosterLayout->addWidget(m_table);
 
 	auto *rosterButtons = new QHBoxLayout();
 	auto *addButton = new QPushButton(QStringLiteral("เพิ่ม"), rosterBox);
 	auto *removeButton = new QPushButton(QStringLiteral("ลบ"), rosterBox);
 	auto *photoButton = new QPushButton(QStringLiteral("เลือกรูป"), rosterBox);
+	auto *cropButton = new QPushButton(QStringLiteral("ปรับรูป"), rosterBox);
 	auto *pinButton = new QPushButton(QStringLiteral("สุ่ม PIN"), rosterBox);
 	rosterButtons->addWidget(addButton);
 	rosterButtons->addWidget(removeButton);
 	rosterButtons->addWidget(photoButton);
+	rosterButtons->addWidget(cropButton);
 	rosterButtons->addWidget(pinButton);
 	rosterLayout->addLayout(rosterButtons);
 
-	root->addWidget(rosterBox);
+	root->addWidget(rosterBox, 1);
 
-	auto *liveBox = new QGroupBox(QStringLiteral("รอบปัจจุบัน"), this);
+	auto *liveBox = new QGroupBox(QStringLiteral("รอบปัจจุบัน"), page);
 	auto *liveLayout = new QVBoxLayout(liveBox);
 
 	m_summary = new QLabel(liveBox);
@@ -154,12 +182,21 @@ void FffDock::buildUi()
 	m_live = new QListWidget(liveBox);
 	liveLayout->addWidget(m_live);
 
-	m_revealButton = new QPushButton(QStringLiteral("Force reveal"), liveBox);
+	m_revealButton = new QPushButton(QStringLiteral("แสดงผลขึ้นจอ"), liveBox);
+	m_revealButton->setMinimumHeight(38);
 	liveLayout->addWidget(m_revealButton);
 
 	auto *clearButton = new QPushButton(QStringLiteral("Clear — เริ่มรอบใหม่"), liveBox);
 	clearButton->setMinimumHeight(44);
 	liveLayout->addWidget(clearButton);
+
+	auto *layoutRow = new QHBoxLayout();
+	m_layoutLabel = new QLabel(liveBox);
+	m_layoutLabel->setWordWrap(true);
+	layoutRow->addWidget(m_layoutLabel, 1);
+	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่ง"), liveBox);
+	layoutRow->addWidget(resetLayoutButton);
+	liveLayout->addLayout(layoutRow);
 
 	root->addWidget(liveBox);
 	root->addStretch();
@@ -168,9 +205,11 @@ void FffDock::buildUi()
 	connect(addButton, &QPushButton::clicked, this, [this]() { addPresident(); });
 	connect(removeButton, &QPushButton::clicked, this, [this]() { removeSelected(); });
 	connect(photoButton, &QPushButton::clicked, this, [this]() { choosePhoto(); });
+	connect(cropButton, &QPushButton::clicked, this, [this]() { adjustPhoto(); });
 	connect(pinButton, &QPushButton::clicked, this, [this]() { regeneratePin(); });
 	connect(m_revealButton, &QPushButton::clicked, this, [this]() { m_session->forceReveal(); });
 	connect(clearButton, &QPushButton::clicked, this, [this]() { m_session->clearRound(); });
+	connect(resetLayoutButton, &QPushButton::clicked, this, [this]() { m_session->setLayout(FffLayout()); });
 
 	connect(m_table, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
 		if (m_updating || !item)
@@ -194,33 +233,68 @@ void FffDock::buildUi()
 	});
 }
 
+void FffDock::addUrlRow(const QString &label, const QString &url)
+{
+	auto *row = new QHBoxLayout();
+	row->addWidget(new QLabel(label, m_urls));
+
+	auto *field = new QLineEdit(url, m_urls);
+	field->setReadOnly(true);
+	field->setCursorPosition(0);
+	row->addWidget(field, 1);
+
+	auto *copy = new QPushButton(QStringLiteral("คัดลอก"), m_urls);
+	row->addWidget(copy);
+	connect(copy, &QPushButton::clicked, copy, [copy, url]() {
+		QGuiApplication::clipboard()->setText(url);
+		copy->setText(QStringLiteral("คัดลอกแล้ว"));
+		QTimer::singleShot(1500, copy, [copy]() { copy->setText(QStringLiteral("คัดลอก")); });
+	});
+
+	m_urlLayout->addLayout(row);
+}
+
 void FffDock::refreshServer()
 {
 	const bool listening = m_server->isListening();
 	m_serverButton->setText(listening ? QStringLiteral("หยุด") : QStringLiteral("เริ่ม"));
 	m_port->setEnabled(!listening);
 
+	while (QLayoutItem *item = m_urlLayout->takeAt(0)) {
+		if (QLayout *child = item->layout()) {
+			while (QLayoutItem *inner = child->takeAt(0)) {
+				delete inner->widget();
+				delete inner;
+			}
+		}
+		delete item->widget();
+		delete item;
+	}
+
 	if (!listening) {
 		m_serverStatus->setText(QStringLiteral("ยังไม่ได้เปิดเซิร์ฟเวอร์"));
-		m_addresses->clear();
 		return;
 	}
 
-	m_serverStatus->setText(QStringLiteral("กำลังฟังพอร์ต %1 · มือถือ %2 เครื่อง · overlay %3")
-					.arg(m_server->boundPort())
+	const quint16 port = m_server->boundPort();
+	m_serverStatus->setText(QStringLiteral("กำลังฟังพอร์ต %1 · มือถือ %2 เครื่อง · จอ %3")
+					.arg(port)
 					.arg(m_server->phoneClientCount())
 					.arg(m_server->overlayClientCount()));
 
-	QStringList lines;
-	lines << QStringLiteral("Browser Source: http://127.0.0.1:%1/overlay").arg(m_server->boundPort());
+	addUrlRow(QStringLiteral("Browser Source"), QStringLiteral("http://127.0.0.1:%1/overlay").arg(port));
+	addUrlRow(QStringLiteral("จอมอนิเตอร์"), QStringLiteral("http://127.0.0.1:%1/monitor").arg(port));
+
 	const QStringList addresses = FffHttpServer::lanAddresses();
 	if (addresses.isEmpty()) {
-		lines << QStringLiteral("ยังไม่เจอ IP วง LAN — เช็คว่าต่อ Wi-Fi/router แล้วหรือยัง");
-	} else {
-		for (const QString &address : addresses)
-			lines << QStringLiteral("มือถือ: http://%1:%2").arg(address).arg(m_server->boundPort());
+		auto *warning = new QLabel(QStringLiteral("ยังไม่เจอ IP วง LAN — เช็คว่าต่อ Wi-Fi/router แล้วหรือยัง"),
+					   m_urls);
+		warning->setWordWrap(true);
+		m_urlLayout->addWidget(warning);
+		return;
 	}
-	m_addresses->setText(lines.join(QLatin1Char('\n')));
+	for (const QString &address : addresses)
+		addUrlRow(QStringLiteral("มือถือ"), QStringLiteral("http://%1:%2").arg(address).arg(port));
 }
 
 void FffDock::refreshTable()
@@ -239,10 +313,15 @@ void FffDock::refreshTable()
 		pin->setFlags(pin->flags() & ~Qt::ItemIsEditable);
 		m_table->setItem(row, ColPin, pin);
 
-		auto *photo = new QTableWidgetItem(president.photo.isEmpty() ? QStringLiteral("—")
-									    : QStringLiteral("มีรูป"));
-		photo->setFlags(photo->flags() & ~Qt::ItemIsEditable);
-		m_table->setItem(row, ColPhoto, photo);
+		QString photo = QStringLiteral("—");
+		if (!president.photo.isEmpty()) {
+			photo = qFuzzyCompare(president.photoZoom, 1.0)
+					? QStringLiteral("มีรูป")
+					: QStringLiteral("มีรูป ×%1").arg(president.photoZoom, 0, 'f', 1);
+		}
+		auto *photoItem = new QTableWidgetItem(photo);
+		photoItem->setFlags(photoItem->flags() & ~Qt::ItemIsEditable);
+		m_table->setItem(row, ColPhoto, photoItem);
 		++row;
 	}
 	m_updating = false;
@@ -252,14 +331,33 @@ void FffDock::refreshLive()
 {
 	const bool revealed = m_session->phase() == FffPhase::Revealed;
 	const int total = m_session->presidents().size();
+	const int voted = m_session->votedCount();
+	const bool ready = total > 0 && voted == total;
+
+	QString phase = QStringLiteral("กำลังรอ");
+	if (revealed)
+		phase = QStringLiteral("ขึ้นจอแล้ว");
+	else if (ready)
+		phase = QStringLiteral("ครบแล้ว พร้อมแสดง");
 
 	m_summary->setText(QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4")
 				   .arg(m_session->round())
-				   .arg(m_session->votedCount())
+				   .arg(voted)
 				   .arg(total)
-				   .arg(revealed ? QStringLiteral("เปิดผลแล้ว") : QStringLiteral("กำลังรอ")));
+				   .arg(phase));
 
 	m_revealButton->setEnabled(!revealed && total > 0);
+	// Nothing reaches the stream on its own any more, so make the moment
+	// everyone has answered impossible to miss.
+	m_revealButton->setStyleSheet(ready && !revealed
+					      ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;")
+					      : QString());
+
+	const FffLayout layout = m_session->layout();
+	m_layoutLabel->setText(QStringLiteral("ตำแหน่งจอ %1% / %2% · ขนาด %3% (ลากปรับได้ที่จอมอนิเตอร์)")
+				       .arg(layout.x * 100, 0, 'f', 1)
+				       .arg(layout.y * 100, 0, 'f', 1)
+				       .arg(layout.scale * 100, 0, 'f', 0));
 
 	m_live->clear();
 	for (const FffPresident &president : m_session->presidents()) {
@@ -343,6 +441,43 @@ void FffDock::choosePhoto()
 		return;
 	FffPresident updated = *existing;
 	updated.photo = stored;
+	updated.photoZoom = 1.0;
+	updated.photoX = 0.0;
+	updated.photoY = 0.0;
+	m_session->updatePresident(updated);
+	refreshTable();
+
+	// Straight into framing: a fresh picture almost always needs it.
+	adjustPhoto();
+}
+
+void FffDock::adjustPhoto()
+{
+	const QString id = selectedPresidentId();
+	if (id.isEmpty())
+		return;
+
+	const FffPresident *existing = m_session->presidentById(id);
+	if (!existing)
+		return;
+	if (existing->photo.isEmpty()) {
+		choosePhoto();
+		return;
+	}
+
+	FffPhotoEditor editor(m_session->photoPath(*existing), existing->photoZoom, existing->photoX,
+			      existing->photoY, this);
+	if (editor.exec() != QDialog::Accepted)
+		return;
+
+	// Re-read: the dialog was modal, but the roster can still have moved.
+	const FffPresident *current = m_session->presidentById(id);
+	if (!current)
+		return;
+	FffPresident updated = *current;
+	updated.photoZoom = editor.zoom();
+	updated.photoX = editor.panX();
+	updated.photoY = editor.panY();
 	m_session->updatePresident(updated);
 	refreshTable();
 }
