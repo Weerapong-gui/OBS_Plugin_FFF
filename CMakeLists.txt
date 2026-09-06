@@ -39,7 +39,7 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
+  find_package(Qt6 COMPONENTS Widgets Core Network)
 
   # Qt 6.8 links AGL alongside OpenGL, but the macOS 26 SDK no longer ships
   # AGL.framework (only a runtime stub under /System remains, which the linker
@@ -75,7 +75,7 @@ if(ENABLE_QT)
   endif()
   unset(_macos_sdk_path)
 
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets Qt6::Network)
   target_compile_options(
     ${CMAKE_PROJECT_NAME}
     PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header -Wno-comma>
@@ -89,7 +89,10 @@ endif()
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/tint-filter.c)
 
 if(ENABLE_QT AND ENABLE_FRONTEND_API)
-  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/fff-dock.cpp)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE src/fff-dock.cpp src/fff-http-server.cpp src/fff-http-server.h src/fff-session.cpp src/fff-session.h
+  )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE FFF_ENABLE_DOCK)
 endif()
 

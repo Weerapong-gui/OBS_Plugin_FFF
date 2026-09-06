@@ -1,0 +1,283 @@
+:root {
+  --red: #e23c3c;
+  --green: #21b04a;
+  --grey: #6d7580;
+  --panel: rgba(14, 17, 22, 0.86);
+  --edge: rgba(255, 255, 255, 0.14);
+  --text: #f4f6f8;
+  --muted: #9aa4b0;
+  font-family: "Noto Sans Thai", "IBM Plex Sans Thai", Thonburi, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---------- phone ---------- */
+
+body.phone {
+  margin: 0;
+  min-height: 100vh;
+  background: #0e1116;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.phone h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.pin-input {
+  width: 100%;
+  font-size: 34px;
+  letter-spacing: 10px;
+  text-align: center;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: #161b22;
+  color: var(--text);
+}
+
+.primary {
+  width: 100%;
+  margin-top: 14px;
+  padding: 16px;
+  font-size: 18px;
+  border: 0;
+  border-radius: 12px;
+  background: #2d6cdf;
+  color: #fff;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.who img,
+.who .noface {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #222932;
+  flex: 0 0 auto;
+}
+
+.who .name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.who .school {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.flags {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  flex: 1;
+  min-height: 260px;
+}
+
+.flag {
+  border: 4px solid transparent;
+  border-radius: 20px;
+  font-size: 30px;
+  font-weight: 800;
+  color: #fff;
+  opacity: 0.45;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}
+
+.flag.red {
+  background: var(--red);
+}
+
+.flag.green {
+  background: var(--green);
+}
+
+.flag.picked {
+  opacity: 1;
+  border-color: #fff;
+}
+
+.status {
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.status.offline {
+  color: #ffb02e;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- overlay ---------- */
+
+body.overlay {
+  margin: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 32px;
+}
+
+.board-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 20px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+.board-head .title {
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.board-head .meta {
+  font-size: 22px;
+  color: var(--muted);
+}
+
+.board {
+  display: grid;
+  /* Capped columns so a three-president test does not stretch three cards
+     across the whole 1920 canvas. */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  justify-content: center;
+  gap: 18px;
+}
+
+.slot {
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 18px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.slot img,
+.slot .noface {
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #222932;
+}
+
+.slot .name {
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.slot .school {
+  font-size: 15px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.slot .result {
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  background: #222932;
+  color: var(--muted);
+}
+
+.slot.waiting .result::after {
+  content: "รอผล";
+}
+
+.slot.pending .result::after {
+  content: "พร้อม";
+}
+
+.slot.red {
+  border-color: var(--red);
+}
+
+.slot.red .result {
+  background: var(--red);
+  color: #fff;
+}
+
+.slot.red .result::after {
+  content: "ธงแดง";
+}
+
+.slot.green {
+  border-color: var(--green);
+}
+
+.slot.green .result {
+  background: var(--green);
+  color: #fff;
+}
+
+.slot.green .result::after {
+  content: "ธงเขียว";
+}
+
+.slot.missing .result {
+  background: var(--grey);
+  color: #fff;
+}
+
+.slot.missing .result::after {
+  content: "ไม่มีข้อมูล";
+}
+
+.reveal-in {
+  animation: pop 0.35s ease;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0.2;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.warn {
+  position: fixed;
+  left: 32px;
+  bottom: 24px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: #b3341f;
+  font-size: 18px;
+}
