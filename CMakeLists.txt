@@ -59,17 +59,16 @@ if(ENABLE_QT)
     endif()
   endif()
 
-  if(APPLE
-     AND TARGET WrapOpenGL::WrapOpenGL
-     AND _macos_sdk_path
-     AND NOT EXISTS "${_macos_sdk_path}/System/Library/Frameworks/AGL.framework")
+  if(
+    APPLE
+    AND TARGET WrapOpenGL::WrapOpenGL
+    AND _macos_sdk_path
+    AND NOT EXISTS "${_macos_sdk_path}/System/Library/Frameworks/AGL.framework"
+  )
     get_target_property(_wrap_opengl_libraries WrapOpenGL::WrapOpenGL INTERFACE_LINK_LIBRARIES)
     if(_wrap_opengl_libraries)
       list(FILTER _wrap_opengl_libraries EXCLUDE REGEX "AGL\\.framework|-framework AGL")
-      set_target_properties(
-        WrapOpenGL::WrapOpenGL
-        PROPERTIES INTERFACE_LINK_LIBRARIES "${_wrap_opengl_libraries}"
-      )
+      set_target_properties(WrapOpenGL::WrapOpenGL PROPERTIES INTERFACE_LINK_LIBRARIES "${_wrap_opengl_libraries}")
     endif()
     unset(_wrap_opengl_libraries)
   endif()

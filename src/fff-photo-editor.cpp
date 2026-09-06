@@ -23,7 +23,7 @@ constexpr int kPreviewSize = 260;
 constexpr double kMinZoom = 1.0;
 constexpr double kMaxZoom = 4.0;
 
-}
+} // namespace
 
 FffPhotoPreview::FffPhotoPreview(QWidget *parent) : QWidget(parent)
 {
@@ -160,9 +160,8 @@ FffPhotoEditor::FffPhotoEditor(const QString &imagePath, double zoom, double x, 
 	auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
 	root->addWidget(buttons);
 
-	connect(m_zoomSlider, &QSlider::valueChanged, this, [this](int value) {
-		m_preview->setFraming(value / 100.0, m_preview->panX(), m_preview->panY());
-	});
+	connect(m_zoomSlider, &QSlider::valueChanged, this,
+		[this](int value) { m_preview->setFraming(value / 100.0, m_preview->panX(), m_preview->panY()); });
 	connect(resetButton, &QPushButton::clicked, this, [this]() {
 		m_zoomSlider->setValue(100);
 		m_preview->setFraming(1.0, 0.0, 0.0);

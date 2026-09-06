@@ -35,7 +35,7 @@ enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColPhoto = 3 };
 
 constexpr int kVisibleRows = 6;
 
-}
+} // namespace
 
 /*
  * Operator console: set the presidents up before the event, then drive the
@@ -146,8 +146,8 @@ void FffDock::buildUi()
 	auto *rosterLayout = new QVBoxLayout(rosterBox);
 
 	m_table = new QTableWidget(0, 4, rosterBox);
-	m_table->setHorizontalHeaderLabels({QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"),
-					    QStringLiteral("PIN"), QStringLiteral("รูป")});
+	m_table->setHorizontalHeaderLabels(
+		{QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"), QStringLiteral("รูป")});
 	m_table->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
 	m_table->horizontalHeader()->setSectionResizeMode(ColSchool, QHeaderView::Stretch);
 	m_table->verticalHeader()->setVisible(false);
@@ -287,8 +287,7 @@ void FffDock::refreshServer()
 
 	const QStringList addresses = FffHttpServer::lanAddresses();
 	if (addresses.isEmpty()) {
-		auto *warning = new QLabel(QStringLiteral("ยังไม่เจอ IP วง LAN — เช็คว่าต่อ Wi-Fi/router แล้วหรือยัง"),
-					   m_urls);
+		auto *warning = new QLabel(QStringLiteral("ยังไม่เจอ IP วง LAN — เช็คว่าต่อ Wi-Fi/router แล้วหรือยัง"), m_urls);
 		warning->setWordWrap(true);
 		m_urlLayout->addWidget(warning);
 		return;
@@ -340,18 +339,14 @@ void FffDock::refreshLive()
 	else if (ready)
 		phase = QStringLiteral("ครบแล้ว พร้อมแสดง");
 
-	m_summary->setText(QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4")
-				   .arg(m_session->round())
-				   .arg(voted)
-				   .arg(total)
-				   .arg(phase));
+	m_summary->setText(
+		QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4").arg(m_session->round()).arg(voted).arg(total).arg(phase));
 
 	m_revealButton->setEnabled(!revealed && total > 0);
 	// Nothing reaches the stream on its own any more, so make the moment
 	// everyone has answered impossible to miss.
-	m_revealButton->setStyleSheet(ready && !revealed
-					      ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;")
-					      : QString());
+	m_revealButton->setStyleSheet(
+		ready && !revealed ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;") : QString());
 
 	const FffLayout layout = m_session->layout();
 	m_layoutLabel->setText(QStringLiteral("ตำแหน่งจอ %1% / %2% · ขนาด %3% (ลากปรับได้ที่จอมอนิเตอร์)")
@@ -465,8 +460,8 @@ void FffDock::adjustPhoto()
 		return;
 	}
 
-	FffPhotoEditor editor(m_session->photoPath(*existing), existing->photoZoom, existing->photoX,
-			      existing->photoY, this);
+	FffPhotoEditor editor(m_session->photoPath(*existing), existing->photoZoom, existing->photoX, existing->photoY,
+			      this);
 	if (editor.exec() != QDialog::Accepted)
 		return;
 

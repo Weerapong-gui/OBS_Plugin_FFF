@@ -285,7 +285,7 @@ void FffSession::load()
 
 	m_round = root.value(QStringLiteral("round")).toInt(1);
 	m_phase = root.value(QStringLiteral("phase")).toString() == QLatin1String("revealed") ? FffPhase::Revealed
-											     : FffPhase::Collecting;
+											      : FffPhase::Collecting;
 
 	const int port = root.value(QStringLiteral("port")).toInt(9779);
 	m_port = (port > 0 && port <= 65535) ? static_cast<quint16>(port) : 9779;
