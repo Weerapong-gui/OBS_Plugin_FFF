@@ -114,6 +114,7 @@ void FffSession::removePresident(const QString &id)
 
 	m_presidents.removeAt(index);
 	m_votes.remove(id);
+	m_pieceLayouts.remove(QStringLiteral("card:") + id);
 	save();
 	emit changed();
 }
@@ -182,6 +183,36 @@ void FffSession::setLayout(const FffLayout &layout)
 	m_layout.scale = qBound(0.5, layout.scale, 2.0);
 	save();
 	emit changed();
+}
+
+bool FffSession::setPieceLayout(const QString &target, const FffLayout *layout)
+{
+	const auto previous = m_pieceLayouts;
+	if (layout)
+		m_pieceLayouts.insert(target, *layout);
+	else
+		m_pieceLayouts.remove(target);
+	if (!save()) {
+		m_pieceLayouts = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+bool FffSession::resetLayouts()
+{
+	const auto previous = m_pieceLayouts;
+	const FffLayout previousLayout = m_layout;
+	m_pieceLayouts.clear();
+	m_layout = FffLayout();
+	if (!save()) {
+		m_pieceLayouts = previous;
+		m_layout = previousLayout;
+		return false;
+	}
+	emit changed();
+	return true;
 }
 
 QString FffSession::configDir() const
@@ -295,6 +326,20 @@ void FffSession::load()
 	m_layout.y = qBound(0.0, layout.value(QStringLiteral("y")).toDouble(0.5), 1.0);
 	m_layout.scale = qBound(0.5, layout.value(QStringLiteral("scale")).toDouble(1.0), 2.0);
 
+	m_pieceLayouts.clear();
+	const QJsonObject pieces = root.value(QStringLiteral("pieces")).toObject();
+	for (auto it = pieces.begin(); it != pieces.end(); ++it) {
+		if (it.key() != QLatin1String("heading") &&
+		    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
+			continue;
+		const QJsonObject value = it.value().toObject();
+		FffLayout piece;
+		piece.x = qBound(0.0, value.value(QStringLiteral("x")).toDouble(0.5), 1.0);
+		piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(0.5), 1.0);
+		piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(1.0), 2.0);
+		m_pieceLayouts.insert(it.key(), piece);
+	}
+
 	m_votes.clear();
 	const QJsonObject votes = root.value(QStringLiteral("votes")).toObject();
 	for (auto it = votes.begin(); it != votes.end(); ++it) {
@@ -306,7 +351,7 @@ void FffSession::load()
 	emit changed();
 }
 
-void FffSession::save() const
+bool FffSession::save() const
 {
 	QJsonArray presidents;
 	for (const FffPresident &president : m_presidents) {
@@ -338,6 +383,15 @@ void FffSession::save() const
 	layout.insert(QStringLiteral("scale"), m_layout.scale);
 
 	root.insert(QStringLiteral("layout"), layout);
+	QJsonObject pieces;
+	for (auto it = m_pieceLayouts.begin(); it != m_pieceLayouts.end(); ++it) {
+		QJsonObject piece;
+		piece.insert(QStringLiteral("x"), it.value().x);
+		piece.insert(QStringLiteral("y"), it.value().y);
+		piece.insert(QStringLiteral("scale"), it.value().scale);
+		pieces.insert(it.key(), piece);
+	}
+	root.insert(QStringLiteral("pieces"), pieces);
 	root.insert(QStringLiteral("presidents"), presidents);
 	root.insert(QStringLiteral("votes"), votes);
 
@@ -345,11 +399,14 @@ void FffSession::save() const
 	QSaveFile file(path);
 	if (!file.open(QIODevice::WriteOnly)) {
 		obs_log(LOG_WARNING, "could not write %s", path.toUtf8().constData());
-		return;
+		return false;
 	}
-	file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
-	if (!file.commit())
+	const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Indented);
+	if (file.write(data) != data.size() || !file.commit()) {
 		obs_log(LOG_WARNING, "could not commit %s", path.toUtf8().constData());
+		return false;
+	}
+	return true;
 }
 
 QByteArray FffSession::overlayStateJson() const
@@ -381,6 +438,15 @@ QByteArray FffSession::overlayStateJson() const
 	layout.insert(QStringLiteral("y"), m_layout.y);
 	layout.insert(QStringLiteral("scale"), m_layout.scale);
 	root.insert(QStringLiteral("layout"), layout);
+	QJsonObject pieces;
+	for (auto it = m_pieceLayouts.begin(); it != m_pieceLayouts.end(); ++it) {
+		QJsonObject piece;
+		piece.insert(QStringLiteral("x"), it.value().x);
+		piece.insert(QStringLiteral("y"), it.value().y);
+		piece.insert(QStringLiteral("scale"), it.value().scale);
+		pieces.insert(it.key(), piece);
+	}
+	root.insert(QStringLiteral("pieces"), pieces);
 
 	return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }

@@ -2,6 +2,8 @@
 // never drift apart.
 (function () {
   function buildSlot() {
+    const piece = document.createElement("div");
+    piece.className = "piece";
     const root = document.createElement("div");
     const face = document.createElement("div");
     const img = document.createElement("img");
@@ -14,7 +16,8 @@
     school.className = "school";
     result.className = "result";
     root.append(face, name, school, result);
-    return { root: root, face: face, img: img, name: name, school: school };
+    piece.appendChild(root);
+    return { piece: piece, root: root, face: face, img: img, name: name, school: school };
   }
 
   // Slots are reused across updates: rebuilding the grid on every vote would
@@ -34,6 +37,7 @@
       let slot = slots.get(president.id);
       if (!slot) {
         slot = buildSlot();
+        slot.piece.dataset.target = "card:" + president.id;
         slots.set(president.id, slot);
       }
       seen.add(president.id);
@@ -60,7 +64,9 @@
       } else {
         className += president.vote === "none" ? "missing" : president.vote;
       }
-      if (slot.root.className !== className) slot.root.className = className;
+      // Keep a reveal animation alive when another vote arrives mid-animation.
+      const animating = slot.root.classList.contains("reveal-in");
+      if (slot.root.className !== className) slot.root.className = className + (animating ? " reveal-in" : "");
 
       if (opts.justRevealed) {
         slot.root.classList.remove("reveal-in");
@@ -68,12 +74,13 @@
         slot.root.classList.add("reveal-in");
       }
 
-      root.appendChild(slot.root);
+      if (root.children[seen.size - 1] !== slot.piece)
+        root.insertBefore(slot.piece, root.children[seen.size - 1] || null);
     }
 
     for (const [id, slot] of slots) {
       if (!seen.has(id)) {
-        slot.root.remove();
+        slot.piece.remove();
         slots.delete(id);
       }
     }
@@ -84,5 +91,35 @@
     wrap.style.left = l.x * 100 + "%";
     wrap.style.top = l.y * 100 + "%";
     wrap.style.transform = `translate(-50%, -50%) scale(${l.scale})`;
+  };
+
+  // Keep the natural grid as a measuring frame for old sessions and resets.
+  // Moving the outer piece leaves that frame intact; the inner card can still
+  // animate on reveal without overwriting its saved position or scale.
+  window.applyPieceLayouts = function (wrap, state, overrides) {
+    const base = state.layout || { x: 0.5, y: 0.5, scale: 1 };
+    applyLayout(wrap, base);
+    const layouts = new Map();
+    for (const piece of wrap.querySelectorAll(".piece")) {
+      let x = piece.offsetWidth / 2;
+      let y = piece.offsetHeight / 2;
+      for (let node = piece; node && node !== wrap; node = node.offsetParent) {
+        x += node.offsetLeft;
+        y += node.offsetTop;
+      }
+      const natural = {
+        x: base.x + (x - wrap.offsetWidth / 2) * base.scale / 1920,
+        y: base.y + (y - wrap.offsetHeight / 2) * base.scale / 1080,
+        scale: base.scale
+      };
+      const key = piece.dataset.target;
+      const saved = overrides && overrides.has(key) ? overrides.get(key) : (state.pieces || {})[key];
+      const layout = saved || natural;
+      const dx = (layout.x - natural.x) * 1920 / base.scale;
+      const dy = (layout.y - natural.y) * 1080 / base.scale;
+      piece.style.transform = `translate(${dx}px, ${dy}px) scale(${layout.scale / base.scale})`;
+      layouts.set(key, { element: piece, layout: { ...layout } });
+    }
+    return layouts;
   };
 })();

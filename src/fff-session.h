@@ -32,8 +32,8 @@ struct FffPresident {
 	double photoY = 0.0;
 };
 
-// Where the board sits on the 1920x1080 canvas. x/y are the centre of the
-// board as a fraction of the canvas.
+// Centre and scale on the 1920x1080 canvas, used for both the legacy board
+// and individual pieces. x/y are fractions of the canvas.
 struct FffLayout {
 	double x = 0.5;
 	double y = 0.5;
@@ -74,6 +74,9 @@ public:
 
 	FffLayout layout() const { return m_layout; }
 	void setLayout(const FffLayout &layout);
+	// "heading" or "card:<id>"; nullptr removes an override to use the grid.
+	bool setPieceLayout(const QString &target, const FffLayout *layout);
+	bool resetLayouts();
 
 	QString photosDir() const;
 	QString photoPath(const FffPresident &president) const;
@@ -81,7 +84,7 @@ public:
 	QString importPhoto(const QString &sourcePath, const QString &presidentId);
 
 	void load();
-	void save() const;
+	bool save() const;
 
 	QByteArray overlayStateJson() const;
 	QByteArray phoneStateJson(const QString &presidentId) const;
@@ -104,4 +107,5 @@ private:
 	int m_round = 1;
 	quint16 m_port = 9779;
 	FffLayout m_layout;
+	QHash<QString, FffLayout> m_pieceLayouts;
 };

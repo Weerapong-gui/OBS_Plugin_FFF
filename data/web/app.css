@@ -156,6 +156,8 @@ body.phone {
 
 .board-wrap {
   position: absolute;
+  width: max-content;
+  pointer-events: none;
   /* left/top/transform come from the saved layout */
 }
 
@@ -163,7 +165,6 @@ body.phone {
   display: flex;
   align-items: baseline;
   gap: 16px;
-  margin-bottom: 20px;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
 }
 
@@ -178,11 +179,43 @@ body.phone {
 }
 
 .board {
+  position: relative;
   display: grid;
   /* Column count is set from the roster size so the board hugs its content —
      the position and symmetry readout mean nothing if it is padded out. */
   gap: 18px;
   width: max-content;
+}
+
+.piece {
+  position: relative;
+  display: flex;
+  transform-origin: center;
+  pointer-events: auto;
+}
+
+.heading-piece {
+  width: max-content;
+  margin-bottom: 20px;
+}
+
+.piece > .slot {
+  width: 100%;
+}
+
+.monitor .piece {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.monitor .piece:active {
+  cursor: grabbing;
+}
+
+.monitor .piece.selected {
+  outline: 3px solid var(--accent);
+  outline-offset: 5px;
 }
 
 .slot {
@@ -361,6 +394,8 @@ body.monitor {
   position: absolute;
   background: var(--accent);
   opacity: 0;
+  z-index: 1;
+  pointer-events: none;
   transition: opacity 0.08s linear;
 }
 
@@ -412,12 +447,16 @@ body.monitor {
   margin-top: 12px;
 }
 
-.controls button {
+.controls button, .controls select {
   padding: 8px 14px;
   border-radius: 8px;
   border: 1px solid var(--edge);
   background: #1a212b;
   color: var(--text);
+}
+
+.controls button:disabled, .controls input:disabled {
+  opacity: 0.45;
 }
 
 .controls label {

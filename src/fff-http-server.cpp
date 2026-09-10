@@ -25,6 +25,8 @@ GPL-2.0-or-later
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <cmath>
+
 namespace {
 
 constexpr int kMaxRequestBytes = 64 * 1024;
@@ -46,6 +48,8 @@ QByteArray reasonPhrase(int code)
 		return "Not Found";
 	case 413:
 		return "Payload Too Large";
+	case 500:
+		return "Internal Server Error";
 	default:
 		return "Error";
 	}
@@ -383,6 +387,37 @@ void FffHttpServer::handleVote(QTcpSocket *socket, const QByteArray &body)
 void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 {
 	const QJsonObject request = QJsonDocument::fromJson(body).object();
+	if (request.contains(QStringLiteral("target"))) {
+		const QString target = request.value(QStringLiteral("target")).toString();
+		const bool reset = request.value(QStringLiteral("reset")).toBool();
+		if (target == QLatin1String("all") && reset) {
+			const bool saved = m_session->resetLayouts();
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		if (target != QLatin1String("heading") &&
+		    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+			sendJson(socket, 404, "{\"error\":\"unknown layout target\"}");
+			return;
+		}
+		FffLayout piece;
+		if (!reset) {
+			const QJsonObject value = request.value(QStringLiteral("layout")).toObject();
+			for (const QString &key : {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("scale")}) {
+				if (!value.value(key).isDouble() || !std::isfinite(value.value(key).toDouble())) {
+					sendJson(socket, 400, "{\"error\":\"invalid layout\"}");
+					return;
+				}
+			}
+			piece.x = qBound(0.0, value.value(QStringLiteral("x")).toDouble(), 1.0);
+			piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(), 1.0);
+			piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(), 2.0);
+		}
+		const bool saved = m_session->setPieceLayout(target, reset ? nullptr : &piece);
+		sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+		return;
+	}
+	// Keep the original whole-board endpoint for existing local clients.
 	FffLayout layout = m_session->layout();
 	if (request.contains(QStringLiteral("x")))
 		layout.x = request.value(QStringLiteral("x")).toDouble(layout.x);

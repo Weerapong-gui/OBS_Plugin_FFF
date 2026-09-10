@@ -194,7 +194,7 @@ void FffDock::buildUi()
 	m_layoutLabel = new QLabel(liveBox);
 	m_layoutLabel->setWordWrap(true);
 	layoutRow->addWidget(m_layoutLabel, 1);
-	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่ง"), liveBox);
+	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่งทั้งหมด"), liveBox);
 	layoutRow->addWidget(resetLayoutButton);
 	liveLayout->addLayout(layoutRow);
 
@@ -209,7 +209,7 @@ void FffDock::buildUi()
 	connect(pinButton, &QPushButton::clicked, this, [this]() { regeneratePin(); });
 	connect(m_revealButton, &QPushButton::clicked, this, [this]() { m_session->forceReveal(); });
 	connect(clearButton, &QPushButton::clicked, this, [this]() { m_session->clearRound(); });
-	connect(resetLayoutButton, &QPushButton::clicked, this, [this]() { m_session->setLayout(FffLayout()); });
+	connect(resetLayoutButton, &QPushButton::clicked, this, [this]() { m_session->resetLayouts(); });
 
 	connect(m_table, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
 		if (m_updating || !item)
@@ -348,11 +348,7 @@ void FffDock::refreshLive()
 	m_revealButton->setStyleSheet(
 		ready && !revealed ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;") : QString());
 
-	const FffLayout layout = m_session->layout();
-	m_layoutLabel->setText(QStringLiteral("ตำแหน่งจอ %1% / %2% · ขนาด %3% (ลากปรับได้ที่จอมอนิเตอร์)")
-				       .arg(layout.x * 100, 0, 'f', 1)
-				       .arg(layout.y * 100, 0, 'f', 1)
-				       .arg(layout.scale * 100, 0, 'f', 0));
+	m_layoutLabel->setText(QStringLiteral("เลือกการ์ดหรือหัวข้อในจอมอนิเตอร์ เพื่อลากและปรับขนาดแยกกัน"));
 
 	m_live->clear();
 	for (const FffPresident &president : m_session->presidents()) {
