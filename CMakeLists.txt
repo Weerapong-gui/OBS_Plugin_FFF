@@ -94,8 +94,6 @@ if(ENABLE_QT AND ENABLE_FRONTEND_API)
       src/fff-dock.cpp
       src/fff-http-server.cpp
       src/fff-http-server.h
-      src/fff-photo-editor.cpp
-      src/fff-photo-editor.h
       src/fff-session.cpp
       src/fff-session.h
   )

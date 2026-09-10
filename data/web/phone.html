@@ -17,7 +17,6 @@
 
 <div id="vote" class="hidden">
   <div class="card who">
-    <div class="face"><img id="face" alt="" /></div>
     <div>
       <div id="name" class="name"></div>
       <div id="school" class="school"></div>
@@ -40,6 +39,7 @@ let savedPin = localStorage.getItem(PIN_KEY) || "";
 let reauthing = false;
 let desired = null;   // colour this phone wants the Mac to have
 let confirmed = null; // colour the Mac has acknowledged
+let pendingVote = false; // only retry a colour explicitly picked on this phone
 let lastState = null;
 let currentRound = null;
 let stream = null;
@@ -58,6 +58,7 @@ function logout() {
   token = "";
   savedPin = "";
   desired = confirmed = lastState = currentRound = null;
+  pendingVote = false;
   if (stream) { stream.close(); stream = null; }
   show("login");
 }
@@ -68,26 +69,21 @@ function paint(state) {
 
   // A new round means the operator pressed Clear: drop last round's answer so
   // the retry loop does not push it back into the fresh round.
-  if (currentRound !== null && state.round !== currentRound) desired = null;
+  if (currentRound !== null && state.round !== currentRound) {
+    desired = null;
+    pendingVote = false;
+  }
   currentRound = state.round;
 
   confirmed = state.you.vote === "none" ? null : state.you.vote;
-  if (desired === null) desired = confirmed;
+  // Once a local choice reaches the Mac it is no longer pending.  Later
+  // updates then come from the operator (or another authoritative change),
+  // so adopt them rather than retrying the old colour forever.
+  if (pendingVote && desired === confirmed) pendingVote = false;
+  if (!pendingVote) desired = confirmed;
 
   el("name").textContent = state.you.name || "";
   el("school").textContent = state.you.school || "";
-
-  const face = el("face");
-  if (state.you.photoUrl) {
-    if (face.getAttribute("src") !== state.you.photoUrl) face.src = state.you.photoUrl;
-    face.hidden = false;
-    // Same framing formula the dock previewed and the overlay uses.
-    face.style.transform =
-      `translate(${state.you.photoX || 0}%, ${state.you.photoY || 0}%) scale(${state.you.photoZoom || 1})`;
-  } else {
-    face.removeAttribute("src");
-    face.hidden = true;
-  }
 
   el("red").classList.toggle("picked", desired === "red");
   el("green").classList.toggle("picked", desired === "green");
@@ -168,6 +164,7 @@ function listen() {
 
 function pick(colour) {
   desired = colour;
+  pendingVote = desired !== confirmed;
   if (lastState) paint(lastState);
   flush();
 }

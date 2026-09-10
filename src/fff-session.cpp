@@ -21,6 +21,39 @@ GPL-2.0-or-later
 #include <QSaveFile>
 #include <QUuid>
 
+#include <algorithm>
+#include <cmath>
+
+bool FffSession::validCardTemplate(const QJsonObject &value)
+{
+	for (const QString &name : {QStringLiteral("image"), QStringLiteral("result")}) {
+		const auto layer = value.value(name).toObject();
+		for (const QString &key : {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
+			const auto number = layer.value(key);
+			if (!number.isDouble() || !std::isfinite(number.toDouble()))
+				return false;
+			const double n = number.toDouble();
+			if (key == QLatin1String("x") || key == QLatin1String("y")) {
+				if (n < -2000 || n > 2000) return false;
+			} else if (n < 1 || n > 2000) return false;
+		}
+	}
+	const auto order = value.value(QStringLiteral("order")).toArray();
+	return order.size() == 2 &&
+	       ((order.at(0).toString() == QLatin1String("result") && order.at(1).toString() == QLatin1String("image")) ||
+	        (order.at(0).toString() == QLatin1String("image") && order.at(1).toString() == QLatin1String("result")));
+}
+
+bool FffSession::setCardTemplate(const QJsonObject &value)
+{
+	if (!validCardTemplate(value)) return false;
+	const auto previous = m_cardTemplate;
+	m_cardTemplate = value;
+	if (!save()) { m_cardTemplate = previous; return false; }
+	emit changed();
+	return true;
+}
+
 FffSession::FffSession(QObject *parent) : QObject(parent) {}
 
 QString FffSession::newId()
@@ -88,6 +121,12 @@ QString FffSession::uniquePin() const
 void FffSession::addPresident(const FffPresident &president)
 {
 	m_presidents.append(president);
+	if (!m_pieceLayers.isEmpty()) {
+		int topLayer = 0;
+		for (auto it = m_pieceLayers.cbegin(); it != m_pieceLayers.cend(); ++it)
+			topLayer = std::max(topLayer, it.value());
+		m_pieceLayers.insert(QStringLiteral("card:") + president.id, topLayer + 1);
+	}
 	save();
 	emit changed();
 }
@@ -108,13 +147,14 @@ void FffSession::removePresident(const QString &id)
 	if (index < 0)
 		return;
 
-	const QString photo = photoPath(m_presidents[index]);
-	if (!photo.isEmpty())
-		QFile::remove(photo);
+	const QString card = cardPath(m_presidents[index]);
+	if (!card.isEmpty())
+		QFile::remove(card);
 
 	m_presidents.removeAt(index);
 	m_votes.remove(id);
 	m_pieceLayouts.remove(QStringLiteral("card:") + id);
+	m_pieceLayers.remove(QStringLiteral("card:") + id);
 	save();
 	emit changed();
 }
@@ -203,12 +243,76 @@ bool FffSession::setPieceLayout(const QString &target, const FffLayout *layout)
 bool FffSession::resetLayouts()
 {
 	const auto previous = m_pieceLayouts;
+	const auto previousLayers = m_pieceLayers;
 	const FffLayout previousLayout = m_layout;
 	m_pieceLayouts.clear();
+	m_pieceLayers.clear();
 	m_layout = FffLayout();
 	if (!save()) {
 		m_pieceLayouts = previous;
+		m_pieceLayers = previousLayers;
 		m_layout = previousLayout;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+bool FffSession::movePieceLayer(const QString &target, const QString &action)
+{
+	struct LayeredPiece {
+		QString target;
+		int layer = 0;
+		int naturalOrder = 0;
+	};
+
+	QVector<LayeredPiece> pieces;
+	pieces.append({QStringLiteral("heading"), m_pieceLayers.value(QStringLiteral("heading"), 0), 0});
+	for (int index = 0; index < m_presidents.size(); ++index) {
+		const QString key = QStringLiteral("card:") + m_presidents[index].id;
+		pieces.append({key, m_pieceLayers.value(key, index + 1), index + 1});
+	}
+
+	int current = -1;
+	for (int index = 0; index < pieces.size(); ++index) {
+		if (pieces[index].target == target) {
+			current = index;
+			break;
+		}
+	}
+	if (current < 0)
+		return false;
+
+	std::stable_sort(pieces.begin(), pieces.end(), [](const LayeredPiece &left, const LayeredPiece &right) {
+		return left.layer == right.layer ? left.naturalOrder < right.naturalOrder : left.layer < right.layer;
+	});
+	for (int index = 0; index < pieces.size(); ++index) {
+		if (pieces[index].target == target) {
+			current = index;
+			break;
+		}
+	}
+
+	if (action == QLatin1String("front")) {
+		std::rotate(pieces.begin() + current, pieces.begin() + current + 1, pieces.end());
+	} else if (action == QLatin1String("forward")) {
+		if (current + 1 < pieces.size())
+			std::swap(pieces[current], pieces[current + 1]);
+	} else if (action == QLatin1String("backward")) {
+		if (current > 0)
+			std::swap(pieces[current], pieces[current - 1]);
+	} else if (action == QLatin1String("back")) {
+		std::rotate(pieces.begin(), pieces.begin() + current, pieces.begin() + current + 1);
+	} else {
+		return false;
+	}
+
+	const auto previous = m_pieceLayers;
+	m_pieceLayers.clear();
+	for (int index = 0; index < pieces.size(); ++index)
+		m_pieceLayers.insert(pieces[index].target, index);
+	if (!save()) {
+		m_pieceLayers = previous;
 		return false;
 	}
 	emit changed();
@@ -226,58 +330,53 @@ QString FffSession::configDir() const
 	return dir;
 }
 
-QString FffSession::photosDir() const
+QString FffSession::cardsDir() const
 {
-	const QString dir = QDir(configDir()).filePath(QStringLiteral("photos"));
+	const QString dir = QDir(configDir()).filePath(QStringLiteral("cards"));
 	os_mkdirs(dir.toUtf8().constData());
 	return dir;
 }
 
-QString FffSession::photoPath(const FffPresident &president) const
+QString FffSession::cardPath(const FffPresident &president) const
 {
-	if (president.photo.isEmpty())
+	if (president.card.isEmpty())
 		return QString();
-	return QDir(photosDir()).filePath(president.photo);
+	return QDir(cardsDir()).filePath(president.card);
 }
 
-QString FffSession::photoUrl(const FffPresident &president) const
+QString FffSession::cardUrl(const FffPresident &president) const
 {
-	const QString path = photoPath(president);
+	const QString path = cardPath(president);
 	if (path.isEmpty())
 		return QString();
 
-	// The mtime in the query string lets the overlay cache faces for a while
-	// and still pick up a picture swapped mid-event.
+	// The mtime lets the renderer cache a card while still picking up a
+	// replacement made during an event.
 	const QFileInfo info(path);
 	if (!info.exists())
 		return QString();
-	return QStringLiteral("/api/photo/%1?v=%2").arg(president.id).arg(info.lastModified().toSecsSinceEpoch());
+	return QStringLiteral("/api/card/%1?v=%2").arg(president.id).arg(info.lastModified().toSecsSinceEpoch());
 }
 
-QString FffSession::importPhoto(const QString &sourcePath, const QString &presidentId)
+QString FffSession::importCard(const QString &sourcePath, const QString &presidentId)
 {
 	const QFileInfo source(sourcePath);
-	if (!source.exists())
+	if (!source.exists() || source.suffix().compare(QLatin1String("png"), Qt::CaseInsensitive) != 0)
 		return QString();
 
-	QString suffix = source.suffix().toLower();
-	if (suffix.isEmpty())
-		suffix = QStringLiteral("png");
-
-	// Same president, new picture: drop whatever was there before so a
-	// changed extension does not leave an orphan behind.
+	// Same president, new card: replace the old file without keeping copies.
 	const int index = indexOf(presidentId);
 	if (index >= 0) {
-		const QString previous = photoPath(m_presidents[index]);
+		const QString previous = cardPath(m_presidents[index]);
 		if (!previous.isEmpty())
 			QFile::remove(previous);
 	}
 
-	const QString name = presidentId + QLatin1Char('.') + suffix;
-	const QString target = QDir(photosDir()).filePath(name);
+	const QString name = presidentId + QStringLiteral(".png");
+	const QString target = QDir(cardsDir()).filePath(name);
 	QFile::remove(target);
 	if (!QFile::copy(sourcePath, target)) {
-		obs_log(LOG_WARNING, "could not copy photo to %s", target.toUtf8().constData());
+		obs_log(LOG_WARNING, "could not copy card to %s", target.toUtf8().constData());
 		return QString();
 	}
 	return name;
@@ -296,6 +395,8 @@ void FffSession::load()
 		return;
 
 	const QJsonObject root = document.object();
+	const auto cardTemplate = root.value(QStringLiteral("cardTemplate")).toObject();
+	m_cardTemplate = validCardTemplate(cardTemplate) ? cardTemplate : QJsonObject();
 
 	m_presidents.clear();
 	const QJsonArray presidents = root.value(QStringLiteral("presidents")).toArray();
@@ -305,11 +406,10 @@ void FffSession::load()
 		president.id = entry.value(QStringLiteral("id")).toString();
 		president.name = entry.value(QStringLiteral("name")).toString();
 		president.school = entry.value(QStringLiteral("school")).toString();
-		president.photo = entry.value(QStringLiteral("photo")).toString();
+		// Old "photo" assets were person portraits, not finished card art.
+		// Deliberately leave them unused instead of stretching them as cards.
+		president.card = entry.value(QStringLiteral("card")).toString();
 		president.pin = entry.value(QStringLiteral("pin")).toString();
-		president.photoZoom = qBound(1.0, entry.value(QStringLiteral("photoZoom")).toDouble(1.0), 4.0);
-		president.photoX = qBound(-100.0, entry.value(QStringLiteral("photoX")).toDouble(0.0), 100.0);
-		president.photoY = qBound(-100.0, entry.value(QStringLiteral("photoY")).toDouble(0.0), 100.0);
 		if (!president.id.isEmpty())
 			m_presidents.append(president);
 	}
@@ -337,7 +437,22 @@ void FffSession::load()
 		piece.x = qBound(0.0, value.value(QStringLiteral("x")).toDouble(0.5), 1.0);
 		piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(0.5), 1.0);
 		piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(1.0), 2.0);
+		piece.scaleX = qBound(0.5, value.value(QStringLiteral("scaleX")).toDouble(piece.scale), 2.0);
+		piece.scaleY = qBound(0.5, value.value(QStringLiteral("scaleY")).toDouble(piece.scale), 2.0);
+		piece.resultScaleX = qBound(0.5, value.value(QStringLiteral("resultScaleX")).toDouble(1.0), 2.0);
+		piece.resultScaleY = qBound(0.5, value.value(QStringLiteral("resultScaleY")).toDouble(1.0), 2.0);
 		m_pieceLayouts.insert(it.key(), piece);
+	}
+
+	m_pieceLayers.clear();
+	const QJsonObject layers = root.value(QStringLiteral("layers")).toObject();
+	for (auto it = layers.begin(); it != layers.end(); ++it) {
+		if (!it.value().isDouble())
+			continue;
+		if (it.key() != QLatin1String("heading") &&
+		    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
+			continue;
+		m_pieceLayers.insert(it.key(), qBound(-10000, it.value().toInt(), 10000));
 	}
 
 	m_votes.clear();
@@ -359,11 +474,8 @@ bool FffSession::save() const
 		entry.insert(QStringLiteral("id"), president.id);
 		entry.insert(QStringLiteral("name"), president.name);
 		entry.insert(QStringLiteral("school"), president.school);
-		entry.insert(QStringLiteral("photo"), president.photo);
+		entry.insert(QStringLiteral("card"), president.card);
 		entry.insert(QStringLiteral("pin"), president.pin);
-		entry.insert(QStringLiteral("photoZoom"), president.photoZoom);
-		entry.insert(QStringLiteral("photoX"), president.photoX);
-		entry.insert(QStringLiteral("photoY"), president.photoY);
 		presidents.append(entry);
 	}
 
@@ -372,7 +484,8 @@ bool FffSession::save() const
 		votes.insert(it.key(), voteName(it.value()));
 
 	QJsonObject root;
-	root.insert(QStringLiteral("version"), 1);
+	root.insert(QStringLiteral("version"), 3);
+	if (!m_cardTemplate.isEmpty()) root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
 	root.insert(QStringLiteral("round"), m_round);
 	root.insert(QStringLiteral("phase"),
@@ -389,9 +502,17 @@ bool FffSession::save() const
 		piece.insert(QStringLiteral("x"), it.value().x);
 		piece.insert(QStringLiteral("y"), it.value().y);
 		piece.insert(QStringLiteral("scale"), it.value().scale);
+		piece.insert(QStringLiteral("scaleX"), it.value().scaleX);
+		piece.insert(QStringLiteral("scaleY"), it.value().scaleY);
+		piece.insert(QStringLiteral("resultScaleX"), it.value().resultScaleX);
+		piece.insert(QStringLiteral("resultScaleY"), it.value().resultScaleY);
 		pieces.insert(it.key(), piece);
 	}
 	root.insert(QStringLiteral("pieces"), pieces);
+	QJsonObject layers;
+	for (auto it = m_pieceLayers.cbegin(); it != m_pieceLayers.cend(); ++it)
+		layers.insert(it.key(), it.value());
+	root.insert(QStringLiteral("layers"), layers);
 	root.insert(QStringLiteral("presidents"), presidents);
 	root.insert(QStringLiteral("votes"), votes);
 
@@ -417,10 +538,7 @@ QByteArray FffSession::overlayStateJson() const
 		entry.insert(QStringLiteral("id"), president.id);
 		entry.insert(QStringLiteral("name"), president.name);
 		entry.insert(QStringLiteral("school"), president.school);
-		entry.insert(QStringLiteral("photoUrl"), photoUrl(president));
-		entry.insert(QStringLiteral("photoZoom"), president.photoZoom);
-		entry.insert(QStringLiteral("photoX"), president.photoX);
-		entry.insert(QStringLiteral("photoY"), president.photoY);
+		entry.insert(QStringLiteral("cardUrl"), cardUrl(president));
 		entry.insert(QStringLiteral("vote"), voteName(voteOf(president.id)));
 		presidents.append(entry);
 	}
@@ -434,6 +552,7 @@ QByteArray FffSession::overlayStateJson() const
 	root.insert(QStringLiteral("presidents"), presidents);
 
 	QJsonObject layout;
+	if (!m_cardTemplate.isEmpty()) root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	layout.insert(QStringLiteral("x"), m_layout.x);
 	layout.insert(QStringLiteral("y"), m_layout.y);
 	layout.insert(QStringLiteral("scale"), m_layout.scale);
@@ -444,9 +563,17 @@ QByteArray FffSession::overlayStateJson() const
 		piece.insert(QStringLiteral("x"), it.value().x);
 		piece.insert(QStringLiteral("y"), it.value().y);
 		piece.insert(QStringLiteral("scale"), it.value().scale);
+		piece.insert(QStringLiteral("scaleX"), it.value().scaleX);
+		piece.insert(QStringLiteral("scaleY"), it.value().scaleY);
+		piece.insert(QStringLiteral("resultScaleX"), it.value().resultScaleX);
+		piece.insert(QStringLiteral("resultScaleY"), it.value().resultScaleY);
 		pieces.insert(it.key(), piece);
 	}
 	root.insert(QStringLiteral("pieces"), pieces);
+	QJsonObject layers;
+	for (auto it = m_pieceLayers.cbegin(); it != m_pieceLayers.cend(); ++it)
+		layers.insert(it.key(), it.value());
+	root.insert(QStringLiteral("layers"), layers);
 
 	return QJsonDocument(root).toJson(QJsonDocument::Compact);
 }
@@ -468,10 +595,6 @@ QByteArray FffSession::phoneStateJson(const QString &presidentId) const
 		you.insert(QStringLiteral("id"), president->id);
 		you.insert(QStringLiteral("name"), president->name);
 		you.insert(QStringLiteral("school"), president->school);
-		you.insert(QStringLiteral("photoUrl"), photoUrl(*president));
-		you.insert(QStringLiteral("photoZoom"), president->photoZoom);
-		you.insert(QStringLiteral("photoX"), president->photoX);
-		you.insert(QStringLiteral("photoY"), president->photoY);
 		you.insert(QStringLiteral("vote"), voteName(voteOf(president->id)));
 		root.insert(QStringLiteral("you"), you);
 	}

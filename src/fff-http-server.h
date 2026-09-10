@@ -19,7 +19,7 @@ class QTimer;
 
 /*
  * A deliberately small HTTP/1.1 server: it serves the phone page, the overlay
- * page and the president photos, takes votes over POST and pushes state to
+ * page and the PNG card assets, takes votes over POST and pushes state to
  * every open page over Server-Sent Events.
  *
  * SSE rather than WebSocket because obs-deps does not ship qtwebsockets, and
@@ -65,7 +65,9 @@ private:
 		   const QByteArray &body);
 	void handleAuth(QTcpSocket *socket, const QByteArray &body);
 	void handleVote(QTcpSocket *socket, const QByteArray &body);
+	void handleOperatorVote(QTcpSocket *socket, const QByteArray &body);
 	void handleLayout(QTcpSocket *socket, const QByteArray &body);
+	void handleLayer(QTcpSocket *socket, const QByteArray &body);
 	void startSse(QTcpSocket *socket, const QString &token, bool overlay);
 	void pushState();
 	void sendHeartbeat();
@@ -74,7 +76,7 @@ private:
 		  const QByteArray &cacheControl = "no-store");
 	void sendJson(QTcpSocket *socket, int code, const QByteArray &json);
 	void sendWebFile(QTcpSocket *socket, const QString &name, const QByteArray &contentType);
-	void sendPhoto(QTcpSocket *socket, const QString &presidentId);
+	void sendCard(QTcpSocket *socket, const QString &presidentId);
 
 	FffSession *m_session = nullptr;
 	QTcpServer *m_server = nullptr;
@@ -83,5 +85,5 @@ private:
 	QHash<QTcpSocket *, Conn> m_conns;
 	QHash<QString, QString> m_tokens;
 	QHash<QString, QByteArray> m_fileCache;
-	QHash<QString, QByteArray> m_photoCache;
+	QHash<QString, QByteArray> m_cardCache;
 };

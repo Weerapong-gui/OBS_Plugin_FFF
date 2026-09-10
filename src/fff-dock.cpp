@@ -5,7 +5,6 @@ GPL-2.0-or-later
 */
 
 #include "fff-http-server.h"
-#include "fff-photo-editor.h"
 #include "fff-session.h"
 
 #include <obs-module.h>
@@ -31,7 +30,7 @@ GPL-2.0-or-later
 
 namespace {
 
-enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColPhoto = 3 };
+enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3 };
 
 constexpr int kVisibleRows = 6;
 
@@ -57,8 +56,7 @@ private:
 	void toggleServer();
 	void addPresident();
 	void removeSelected();
-	void choosePhoto();
-	void adjustPhoto();
+	void chooseCard();
 	void regeneratePin();
 
 	FffSession *m_session = nullptr;
@@ -146,8 +144,8 @@ void FffDock::buildUi()
 	auto *rosterLayout = new QVBoxLayout(rosterBox);
 
 	m_table = new QTableWidget(0, 4, rosterBox);
-	m_table->setHorizontalHeaderLabels(
-		{QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"), QStringLiteral("รูป")});
+	m_table->setHorizontalHeaderLabels({QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"),
+					    QStringLiteral("การ์ด PNG")});
 	m_table->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
 	m_table->horizontalHeader()->setSectionResizeMode(ColSchool, QHeaderView::Stretch);
 	m_table->verticalHeader()->setVisible(false);
@@ -160,13 +158,11 @@ void FffDock::buildUi()
 	auto *rosterButtons = new QHBoxLayout();
 	auto *addButton = new QPushButton(QStringLiteral("เพิ่ม"), rosterBox);
 	auto *removeButton = new QPushButton(QStringLiteral("ลบ"), rosterBox);
-	auto *photoButton = new QPushButton(QStringLiteral("เลือกรูป"), rosterBox);
-	auto *cropButton = new QPushButton(QStringLiteral("ปรับรูป"), rosterBox);
+	auto *cardButton = new QPushButton(QStringLiteral("เลือกการ์ด PNG"), rosterBox);
 	auto *pinButton = new QPushButton(QStringLiteral("สุ่ม PIN"), rosterBox);
 	rosterButtons->addWidget(addButton);
 	rosterButtons->addWidget(removeButton);
-	rosterButtons->addWidget(photoButton);
-	rosterButtons->addWidget(cropButton);
+	rosterButtons->addWidget(cardButton);
 	rosterButtons->addWidget(pinButton);
 	rosterLayout->addLayout(rosterButtons);
 
@@ -204,8 +200,7 @@ void FffDock::buildUi()
 	connect(m_serverButton, &QPushButton::clicked, this, [this]() { toggleServer(); });
 	connect(addButton, &QPushButton::clicked, this, [this]() { addPresident(); });
 	connect(removeButton, &QPushButton::clicked, this, [this]() { removeSelected(); });
-	connect(photoButton, &QPushButton::clicked, this, [this]() { choosePhoto(); });
-	connect(cropButton, &QPushButton::clicked, this, [this]() { adjustPhoto(); });
+	connect(cardButton, &QPushButton::clicked, this, [this]() { chooseCard(); });
 	connect(pinButton, &QPushButton::clicked, this, [this]() { regeneratePin(); });
 	connect(m_revealButton, &QPushButton::clicked, this, [this]() { m_session->forceReveal(); });
 	connect(clearButton, &QPushButton::clicked, this, [this]() { m_session->clearRound(); });
@@ -312,15 +307,10 @@ void FffDock::refreshTable()
 		pin->setFlags(pin->flags() & ~Qt::ItemIsEditable);
 		m_table->setItem(row, ColPin, pin);
 
-		QString photo = QStringLiteral("—");
-		if (!president.photo.isEmpty()) {
-			photo = qFuzzyCompare(president.photoZoom, 1.0)
-					? QStringLiteral("มีรูป")
-					: QStringLiteral("มีรูป ×%1").arg(president.photoZoom, 0, 'f', 1);
-		}
-		auto *photoItem = new QTableWidgetItem(photo);
-		photoItem->setFlags(photoItem->flags() & ~Qt::ItemIsEditable);
-		m_table->setItem(row, ColPhoto, photoItem);
+		auto *cardItem =
+			new QTableWidgetItem(president.card.isEmpty() ? QStringLiteral("—") : QStringLiteral("มี PNG"));
+		cardItem->setFlags(cardItem->flags() & ~Qt::ItemIsEditable);
+		m_table->setItem(row, ColCard, cardItem);
 		++row;
 	}
 	m_updating = false;
@@ -412,18 +402,18 @@ void FffDock::removeSelected()
 	refreshTable();
 }
 
-void FffDock::choosePhoto()
+void FffDock::chooseCard()
 {
 	const QString id = selectedPresidentId();
 	if (id.isEmpty())
 		return;
 
-	const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("เลือกรูปนายก"), QString(),
-							  QStringLiteral("รูปภาพ (*.png *.jpg *.jpeg *.webp)"));
+	const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("เลือกการ์ด PNG"), QString(),
+							  QStringLiteral("การ์ด PNG (*.png)"));
 	if (file.isEmpty())
 		return;
 
-	const QString stored = m_session->importPhoto(file, id);
+	const QString stored = m_session->importCard(file, id);
 	if (stored.isEmpty())
 		return;
 
@@ -431,44 +421,7 @@ void FffDock::choosePhoto()
 	if (!existing)
 		return;
 	FffPresident updated = *existing;
-	updated.photo = stored;
-	updated.photoZoom = 1.0;
-	updated.photoX = 0.0;
-	updated.photoY = 0.0;
-	m_session->updatePresident(updated);
-	refreshTable();
-
-	// Straight into framing: a fresh picture almost always needs it.
-	adjustPhoto();
-}
-
-void FffDock::adjustPhoto()
-{
-	const QString id = selectedPresidentId();
-	if (id.isEmpty())
-		return;
-
-	const FffPresident *existing = m_session->presidentById(id);
-	if (!existing)
-		return;
-	if (existing->photo.isEmpty()) {
-		choosePhoto();
-		return;
-	}
-
-	FffPhotoEditor editor(m_session->photoPath(*existing), existing->photoZoom, existing->photoX, existing->photoY,
-			      this);
-	if (editor.exec() != QDialog::Accepted)
-		return;
-
-	// Re-read: the dialog was modal, but the roster can still have moved.
-	const FffPresident *current = m_session->presidentById(id);
-	if (!current)
-		return;
-	FffPresident updated = *current;
-	updated.photoZoom = editor.zoom();
-	updated.photoX = editor.panX();
-	updated.photoY = editor.panY();
+	updated.card = stored;
 	m_session->updatePresident(updated);
 	refreshTable();
 }

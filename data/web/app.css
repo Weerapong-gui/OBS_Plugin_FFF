@@ -10,34 +10,36 @@
   font-family: "Noto Sans Thai", "IBM Plex Sans Thai", Thonburi, -apple-system, "Segoe UI", sans-serif;
 }
 
+.monitor-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 38%); gap: 20px; }
+.board-panel { min-width: 0; }
+.template-panel { min-width: 0; padding: 16px; background: #161b22; border: 1px solid var(--edge); border-radius: 12px; }
+.template-panel h2 { margin: 0; font-size: 20px; }
+.template-panel p { color: var(--muted); font-size: 13px; }
+.template-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
+.template-panel button { cursor: pointer; }
+.template-panel button:disabled { opacity: 0.45; cursor: default; }
+#templateViewport { height: 340px; overflow: auto; position: relative; touch-action: none; background-color: #252a32;
+  background-image: conic-gradient(#343a43 25%, transparent 0 50%, #343a43 0 75%, transparent 0);
+  background-size: 20px 20px; }
+#templateStage { position: absolute; left: 48px; top: 90px; width: 420px; height: 152px; transform-origin: top left; }
+#templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; transform: translate(2px, 2px); }
+#templateResize { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; padding: 0; border-radius: 0; background: var(--accent); pointer-events: auto; cursor: nwse-resize; }
+#templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; transform: translate(2px, 2px); }
+#templatePlaceholder[hidden] { display: none; }
+#templateLayers { display: grid; gap: 5px; }
+#templateLayers [aria-pressed="true"] { border-color: var(--accent); background: #234666; }
+.template-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.template-fields label { display: grid; gap: 4px; }
+.template-fields input { width: 100%; }
+@media (max-width: 1000px) { .monitor-workspace { grid-template-columns: minmax(0, 1fr); } }
+
 * {
   box-sizing: border-box;
 }
 
 .hidden {
   display: none !important;
-}
-
-/* ---------- round photo, framed the same way everywhere ---------- */
-
-.face {
-  border-radius: 50%;
-  overflow: hidden;
-  background: #222932;
-  flex: 0 0 auto;
-}
-
-.face img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  /* transform is set per person: translate(x%, y%) scale(zoom) */
-}
-
-/* An author rule beats the browser default for [hidden], so say it here. */
-.face img[hidden] {
-  display: none;
 }
 
 /* ---------- phone ---------- */
@@ -91,14 +93,7 @@ body.phone {
 }
 
 .who {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.who .face {
-  width: 72px;
-  height: 72px;
+  text-align: center;
 }
 
 .who .name {
@@ -183,7 +178,7 @@ body.phone {
   display: grid;
   /* Column count is set from the roster size so the board hugs its content —
      the position and symmetry readout mean nothing if it is padded out. */
-  gap: 18px;
+  gap: 28px 34px;
   width: max-content;
 }
 
@@ -219,86 +214,55 @@ body.phone {
 }
 
 .slot {
-  background: var(--panel);
-  border: 2px solid var(--edge);
-  border-radius: 18px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  width: 420px;
+  height: 152px;
+  position: relative;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 0;
+  overflow: visible;
   transition: border-color 0.25s ease, background 0.25s ease;
 }
 
-.slot .face {
-  width: 108px;
-  height: 108px;
+/* The operator needs a visible placement frame before voting, but the on-air
+   overlay should contain only the imported PNG and any flag-result colour. */
+.monitor .slot.waiting {
+  background: rgba(244, 246, 248, 0.12);
+  border-color: rgba(244, 246, 248, 0.4);
 }
 
-.slot .name {
-  font-size: 19px;
-  font-weight: 700;
-  text-align: center;
+.slot .card-image {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* The vote result is a backdrop; the imported card artwork must remain
+     visible above it (including its transparent regions). */
+  z-index: 1;
 }
 
-.slot .school {
-  font-size: 15px;
-  color: var(--muted);
-  text-align: center;
+.slot .card-image[hidden] {
+  display: none;
 }
 
 .slot .result {
-  width: 100%;
-  padding: 10px 0;
-  border-radius: 12px;
-  text-align: center;
-  font-size: 20px;
-  font-weight: 800;
-  background: #222932;
-  color: var(--muted);
-}
-
-.slot.waiting .result::after {
-  content: "รอผล";
-}
-
-.slot.pending .result::after {
-  content: "พร้อม";
-}
-
-.slot.red {
-  border-color: var(--red);
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 0;
+  transform-origin: center;
 }
 
 .slot.red .result {
+  display: block;
   background: var(--red);
-  color: #fff;
-}
-
-.slot.red .result::after {
-  content: "ธงแดง";
-}
-
-.slot.green {
-  border-color: var(--green);
 }
 
 .slot.green .result {
+  display: block;
   background: var(--green);
-  color: #fff;
-}
-
-.slot.green .result::after {
-  content: "ธงเขียว";
-}
-
-.slot.missing .result {
-  background: var(--grey);
-  color: #fff;
-}
-
-.slot.missing .result::after {
-  content: "ไม่มีข้อมูล";
 }
 
 .reveal-in {
@@ -386,6 +350,13 @@ body.monitor {
   touch-action: none;
 }
 
+.monitor .canvas.show-grid {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
 .draggable:active {
   cursor: grabbing;
 }
@@ -454,6 +425,50 @@ body.monitor {
   background: #1a212b;
   color: var(--text);
 }
+
+.controls input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.piece-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.piece-options[hidden] {
+  display: none;
+}
+
+.piece-options label {
+  color: var(--muted);
+}
+
+.flag-controls button {
+  color: #fff;
+  font-weight: 700;
+}
+
+.layer-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.layer-controls button {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: #1a212b;
+  color: var(--text);
+}
+
+.flag-controls .flag-none { background: #3a424e; }
+.flag-controls .flag-green { background: var(--green); }
+.flag-controls .flag-red { background: var(--red); }
 
 .controls button:disabled, .controls input:disabled {
   opacity: 0.45;

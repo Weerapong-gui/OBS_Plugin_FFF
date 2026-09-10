@@ -1,33 +1,51 @@
 // Shared by /overlay and /monitor so the operator's preview and the stream
 // never drift apart.
 (function () {
+  function fitCardToImage(slot) {
+    if (!slot.img.naturalWidth || !slot.img.naturalHeight) return;
+    // Keep the board width consistent while letting every imported PNG keep
+    // its own aspect ratio. The template intentionally owns its dimensions.
+    if (slot.piece.closest(".board-wrap")?._templateActive) return;
+    const contentWidth = 416;
+    const contentHeight = Math.max(1, Math.round(contentWidth * slot.img.naturalHeight / slot.img.naturalWidth));
+    slot.root.style.width = "420px";
+    slot.root.style.height = contentHeight + 4 + "px";
+  }
+
+  window.applyCardTemplate = function (slot, template) {
+    for (const [name, selector] of [["image", ".card-image"], ["result", ".result"]]) {
+      const el = slot.querySelector(selector);
+      if (!template) { el.removeAttribute("style"); continue; }
+      const box = template[name];
+      Object.assign(el.style, { position: "absolute", left: box.x + "px", top: box.y + "px",
+        width: box.width + "px", height: box.height + "px", right: "auto", bottom: "auto",
+        transform: "none", zIndex: String(template.order.indexOf(name)) });
+    }
+  };
   function buildSlot() {
     const piece = document.createElement("div");
     piece.className = "piece";
     const root = document.createElement("div");
-    const face = document.createElement("div");
     const img = document.createElement("img");
-    const name = document.createElement("div");
-    const school = document.createElement("div");
     const result = document.createElement("div");
-    face.className = "face";
-    face.appendChild(img);
-    name.className = "name";
-    school.className = "school";
+    img.className = "card-image";
+    img.alt = "";
     result.className = "result";
-    root.append(face, name, school, result);
+    root.append(img, result);
     piece.appendChild(root);
-    return { piece: piece, root: root, face: face, img: img, name: name, school: school };
+    const slot = { piece: piece, root: root, img: img, result: result };
+    img.addEventListener("load", () => fitCardToImage(slot));
+    return slot;
   }
 
   // Slots are reused across updates: rebuilding the grid on every vote would
-  // restart the photo loads and flicker on air.
+  // restart PNG loads and flicker on air.
   window.renderBoard = function (root, state, opts) {
     if (!root._slots) root._slots = new Map();
     const slots = root._slots;
 
-    const columns = Math.min(Math.max(state.presidents.length, 1), 5);
-    const template = `repeat(${columns}, 240px)`;
+    const columns = Math.min(Math.max(Math.ceil(Math.sqrt(state.presidents.length)), 1), 3);
+    const template = `repeat(${columns}, 420px)`;
     if (root.style.gridTemplateColumns !== template) root.style.gridTemplateColumns = template;
 
     const revealed = opts.revealed;
@@ -42,28 +60,19 @@
       }
       seen.add(president.id);
 
-      if (slot.name.textContent !== president.name) slot.name.textContent = president.name;
-      if (slot.school.textContent !== president.school) slot.school.textContent = president.school;
-
-      if (president.photoUrl) {
-        if (slot.img.getAttribute("src") !== president.photoUrl) slot.img.src = president.photoUrl;
+      if (president.cardUrl) {
+        if (slot.img.getAttribute("src") !== president.cardUrl) slot.img.src = president.cardUrl;
         slot.img.hidden = false;
-        const zoom = president.photoZoom || 1;
-        const x = president.photoX || 0;
-        const y = president.photoY || 0;
-        const transform = `translate(${x}%, ${y}%) scale(${zoom})`;
-        if (slot.img.style.transform !== transform) slot.img.style.transform = transform;
+        fitCardToImage(slot);
       } else {
         slot.img.removeAttribute("src");
         slot.img.hidden = true;
+        slot.root.style.width = "420px";
+        slot.root.style.height = "152px";
       }
 
-      let className = "slot ";
-      if (!revealed) {
-        className += president.vote === "none" ? "waiting" : "pending";
-      } else {
-        className += president.vote === "none" ? "missing" : president.vote;
-      }
+      const showVote = president.vote !== "none" && (revealed || opts.showVotes);
+      const className = "slot " + (showVote ? president.vote : "waiting") + (president.cardUrl ? " has-card" : "");
       // Keep a reveal animation alive when another vote arrives mid-animation.
       const animating = slot.root.classList.contains("reveal-in");
       if (slot.root.className !== className) slot.root.className = className + (animating ? " reveal-in" : "");
@@ -117,8 +126,22 @@
       const layout = saved || natural;
       const dx = (layout.x - natural.x) * 1920 / base.scale;
       const dy = (layout.y - natural.y) * 1080 / base.scale;
-      piece.style.transform = `translate(${dx}px, ${dy}px) scale(${layout.scale / base.scale})`;
-      layouts.set(key, { element: piece, layout: { ...layout } });
+      const scaleX = layout.scaleX || layout.scale || 1;
+      const scaleY = layout.scaleY || layout.scale || 1;
+      piece.style.transform = `translate(${dx}px, ${dy}px) scale(${scaleX / base.scale}, ${scaleY / base.scale})`;
+      const resultScaleX = layout.resultScaleX || 1;
+      const resultScaleY = layout.resultScaleY || 1;
+      const result = piece.querySelector(".result");
+      const slot = piece.querySelector(".slot");
+      if (slot) {
+        piece.closest(".board-wrap")._templateActive = !!state.cardTemplate;
+        applyCardTemplate(slot, state.cardTemplate);
+      }
+      if (result && !state.cardTemplate) result.style.transform = `scale(${resultScaleX}, ${resultScaleY})`;
+      const layer = state.layers && state.layers[key];
+      piece.style.zIndex = Number.isInteger(layer) ? String(layer) : "";
+      layouts.set(key, { element: piece, layout: { ...layout, scaleX: scaleX, scaleY: scaleY,
+        resultScaleX: resultScaleX, resultScaleY: resultScaleY } });
     }
     return layouts;
   };
