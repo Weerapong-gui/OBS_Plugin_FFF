@@ -1,0 +1,482 @@
+:root {
+  --red: #e23c3c;
+  --green: #21b04a;
+  --grey: #6d7580;
+  --panel: rgba(14, 17, 22, 0.86);
+  --edge: rgba(255, 255, 255, 0.14);
+  --text: #f4f6f8;
+  --muted: #9aa4b0;
+  --accent: #4d9dff;
+  font-family: "Noto Sans Thai", "IBM Plex Sans Thai", Thonburi, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- round photo, framed the same way everywhere ---------- */
+
+.face {
+  border-radius: 50%;
+  overflow: hidden;
+  background: #222932;
+  flex: 0 0 auto;
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* transform is set per person: translate(x%, y%) scale(zoom) */
+}
+
+/* An author rule beats the browser default for [hidden], so say it here. */
+.face img[hidden] {
+  display: none;
+}
+
+/* ---------- phone ---------- */
+
+body.phone {
+  margin: 0;
+  min-height: 100vh;
+  background: #0e1116;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.phone h1 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.pin-input {
+  width: 100%;
+  font-size: 34px;
+  letter-spacing: 10px;
+  text-align: center;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: #161b22;
+  color: var(--text);
+}
+
+.primary {
+  width: 100%;
+  margin-top: 14px;
+  padding: 16px;
+  font-size: 18px;
+  border: 0;
+  border-radius: 12px;
+  background: #2d6cdf;
+  color: #fff;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.who .face {
+  width: 72px;
+  height: 72px;
+}
+
+.who .name {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.who .school {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.flags {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  flex: 1;
+  min-height: 260px;
+}
+
+.flag {
+  border: 4px solid transparent;
+  border-radius: 20px;
+  font-size: 30px;
+  font-weight: 800;
+  color: #fff;
+  opacity: 0.45;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+}
+
+.flag.red {
+  background: var(--red);
+}
+
+.flag.green {
+  background: var(--green);
+}
+
+.flag.picked {
+  opacity: 1;
+  border-color: #fff;
+}
+
+.status {
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.status.offline {
+  color: #ffb02e;
+}
+
+/* ---------- the board itself (overlay + monitor) ---------- */
+
+.board-wrap {
+  position: absolute;
+  width: max-content;
+  pointer-events: none;
+  /* left/top/transform come from the saved layout */
+}
+
+.board-head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+
+.board-head .title {
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.board-head .meta {
+  font-size: 22px;
+  color: var(--muted);
+}
+
+.board {
+  position: relative;
+  display: grid;
+  /* Column count is set from the roster size so the board hugs its content —
+     the position and symmetry readout mean nothing if it is padded out. */
+  gap: 18px;
+  width: max-content;
+}
+
+.piece {
+  position: relative;
+  display: flex;
+  transform-origin: center;
+  pointer-events: auto;
+}
+
+.heading-piece {
+  width: max-content;
+  margin-bottom: 20px;
+}
+
+.piece > .slot {
+  width: 100%;
+}
+
+.monitor .piece {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.monitor .piece:active {
+  cursor: grabbing;
+}
+
+.monitor .piece.selected {
+  outline: 3px solid var(--accent);
+  outline-offset: 5px;
+}
+
+.slot {
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 18px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+
+.slot .face {
+  width: 108px;
+  height: 108px;
+}
+
+.slot .name {
+  font-size: 19px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.slot .school {
+  font-size: 15px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.slot .result {
+  width: 100%;
+  padding: 10px 0;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  background: #222932;
+  color: var(--muted);
+}
+
+.slot.waiting .result::after {
+  content: "รอผล";
+}
+
+.slot.pending .result::after {
+  content: "พร้อม";
+}
+
+.slot.red {
+  border-color: var(--red);
+}
+
+.slot.red .result {
+  background: var(--red);
+  color: #fff;
+}
+
+.slot.red .result::after {
+  content: "ธงแดง";
+}
+
+.slot.green {
+  border-color: var(--green);
+}
+
+.slot.green .result {
+  background: var(--green);
+  color: #fff;
+}
+
+.slot.green .result::after {
+  content: "ธงเขียว";
+}
+
+.slot.missing .result {
+  background: var(--grey);
+  color: #fff;
+}
+
+.slot.missing .result::after {
+  content: "ไม่มีข้อมูล";
+}
+
+.reveal-in {
+  animation: pop 0.35s ease;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.9);
+    opacity: 0.2;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ---------- overlay: a bare 1920x1080 canvas, empty until revealed ------- */
+
+body.overlay {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---------- monitor ---------- */
+
+body.monitor {
+  margin: 0;
+  padding: 16px;
+  background: #0e1116;
+  color: var(--text);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.bar-title {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.bar-status {
+  color: var(--muted);
+}
+
+.bar-warn {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #b3341f;
+}
+
+.frame {
+  position: relative;
+  /* Shrink to fit the window height too, so the controls stay on screen. */
+  width: min(100%, calc(62vh * 16 / 9));
+  margin: 0 auto;
+  aspect-ratio: 16 / 9;
+  background: #05070a;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: top left;
+}
+
+.draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.draggable:active {
+  cursor: grabbing;
+}
+
+.guide {
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: opacity 0.08s linear;
+}
+
+.guide.on {
+  opacity: 0.9;
+}
+
+.guide-v {
+  top: 0;
+  width: 2px;
+  height: 100%;
+}
+
+.guide-h {
+  left: 0;
+  height: 2px;
+  width: 100%;
+}
+
+.guide[data-guide="cx"] {
+  left: calc(50% - 1px);
+}
+
+.guide[data-guide="t1"] {
+  left: calc(33.3333% - 1px);
+}
+
+.guide[data-guide="t2"] {
+  left: calc(66.6667% - 1px);
+}
+
+.guide[data-guide="cy"] {
+  top: calc(50% - 1px);
+}
+
+.guide[data-guide="h1"] {
+  top: calc(33.3333% - 1px);
+}
+
+.guide[data-guide="h2"] {
+  top: calc(66.6667% - 1px);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.controls button, .controls select {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: #1a212b;
+  color: var(--text);
+}
+
+.controls button:disabled, .controls input:disabled {
+  opacity: 0.45;
+}
+
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.symmetry {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.symmetry.ok {
+  color: var(--green);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+}

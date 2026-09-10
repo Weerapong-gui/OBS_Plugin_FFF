@@ -1,0 +1,46 @@
+# Layout regression checks
+
+Native checks compile the real session and HTTP server, replacing only the OBS
+host functions with a temporary config directory. They cover layout API writes,
+validation, persistence, reveal/clear, deletion, resets and failed disk writes.
+The main plugin build does not depend on these test tools.
+
+From the repository root on a configured macOS development machine:
+
+```sh
+cmake -S tests -B /private/tmp/fff-layout-native \
+  -DCMAKE_PREFIX_PATH="$PWD/.deps/obs-deps-qt6-2025-07-11-universal" \
+  -DOBS_INCLUDE_DIR="$PWD/.deps/Frameworks/libobs.framework/Headers"
+cmake --build /private/tmp/fff-layout-native
+ctest --test-dir /private/tmp/fff-layout-native --output-on-failure
+```
+
+Browser checks serve the actual web files with a fixture HTTP/SSE server. They
+exercise real pointer events, monitor/overlay geometry, independent scaling,
+votes during editing, failed saves/retries, keyboard controls and roster changes.
+Use an installed Chromium browser; the default executable is Brave on macOS.
+Dependencies go into a temporary directory, not the plugin project:
+
+```sh
+FFF_TEST_DEPS=$(mktemp -d /private/tmp/fff-browser-tests.XXXXXX)
+npm install --prefix "$FFF_TEST_DEPS" puppeteer-core
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/overlay-layout.cjs
+```
+
+Set `FFF_BROWSER` to another Chromium executable if needed. These checks do not
+install the plugin or alter the operator's OBS session; loading it inside OBS
+and checking the Browser Source remains an integration smoke test.
+
+## Layout interface
+
+`POST /api/layout` remains localhost-only. A piece update is
+`{"target":"card:<president-id>","layout":{"x":0.5,"y":0.5,"scale":1}}`;
+use `"heading"` for the title and round label. Centres are canvas fractions
+clamped to 0–1, with scale clamped to 0.5–2. Missing or nonnumeric layout values
+return 400, unknown targets return 404, and failed saves return 500.
+
+`{"target":"card:<president-id>","reset":true}` removes that piece's override.
+`{"target":"all","reset":true}` removes every override and resets the legacy
+grid to centre/100%. Requests without a target retain the original whole-board
+layout API. Session JSON and overlay SSE add a `pieces` object keyed by these
+targets; absent entries use the existing grid and legacy `layout` values.

@@ -1,0 +1,479 @@
+/*
+FFF Tools for OBS - flag board session state
+Copyright (C) 2026 Student Union MFU <studentunion.developer@gmail.com>
+GPL-2.0-or-later
+*/
+
+#include "fff-session.h"
+
+#include <obs-module.h>
+#include <plugin-support.h>
+#include <util/platform.h>
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDateTime>
+#include <QRandomGenerator>
+#include <QSaveFile>
+#include <QUuid>
+
+FffSession::FffSession(QObject *parent) : QObject(parent) {}
+
+QString FffSession::newId()
+{
+	return QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+}
+
+QString FffSession::voteName(FffVote vote)
+{
+	switch (vote) {
+	case FffVote::Red:
+		return QStringLiteral("red");
+	case FffVote::Green:
+		return QStringLiteral("green");
+	default:
+		return QStringLiteral("none");
+	}
+}
+
+FffVote FffSession::voteFromName(const QString &name)
+{
+	if (name == QLatin1String("red"))
+		return FffVote::Red;
+	if (name == QLatin1String("green"))
+		return FffVote::Green;
+	return FffVote::None;
+}
+
+int FffSession::indexOf(const QString &id) const
+{
+	for (int i = 0; i < m_presidents.size(); ++i) {
+		if (m_presidents[i].id == id)
+			return i;
+	}
+	return -1;
+}
+
+const FffPresident *FffSession::presidentById(const QString &id) const
+{
+	const int index = indexOf(id);
+	return index < 0 ? nullptr : &m_presidents[index];
+}
+
+const FffPresident *FffSession::presidentByPin(const QString &pin) const
+{
+	if (pin.isEmpty())
+		return nullptr;
+	for (const FffPresident &president : m_presidents) {
+		if (president.pin == pin)
+			return &president;
+	}
+	return nullptr;
+}
+
+QString FffSession::uniquePin() const
+{
+	for (int attempt = 0; attempt < 1000; ++attempt) {
+		const QString pin = QString::number(QRandomGenerator::system()->bounded(100000, 1000000));
+		if (!presidentByPin(pin))
+			return pin;
+	}
+	return QString::number(QRandomGenerator::system()->bounded(100000, 1000000));
+}
+
+void FffSession::addPresident(const FffPresident &president)
+{
+	m_presidents.append(president);
+	save();
+	emit changed();
+}
+
+void FffSession::updatePresident(const FffPresident &president)
+{
+	const int index = indexOf(president.id);
+	if (index < 0)
+		return;
+	m_presidents[index] = president;
+	save();
+	emit changed();
+}
+
+void FffSession::removePresident(const QString &id)
+{
+	const int index = indexOf(id);
+	if (index < 0)
+		return;
+
+	const QString photo = photoPath(m_presidents[index]);
+	if (!photo.isEmpty())
+		QFile::remove(photo);
+
+	m_presidents.removeAt(index);
+	m_votes.remove(id);
+	m_pieceLayouts.remove(QStringLiteral("card:") + id);
+	save();
+	emit changed();
+}
+
+FffVote FffSession::voteOf(const QString &id) const
+{
+	return m_votes.value(id, FffVote::None);
+}
+
+int FffSession::votedCount() const
+{
+	int count = 0;
+	for (const FffPresident &president : m_presidents) {
+		if (m_votes.value(president.id, FffVote::None) != FffVote::None)
+			++count;
+	}
+	return count;
+}
+
+bool FffSession::setVote(const QString &presidentId, FffVote vote)
+{
+	if (indexOf(presidentId) < 0)
+		return false;
+
+	if (vote == FffVote::None)
+		m_votes.remove(presidentId);
+	else
+		m_votes.insert(presidentId, vote);
+
+	save();
+	emit changed();
+	return true;
+}
+
+void FffSession::forceReveal()
+{
+	if (m_phase == FffPhase::Revealed)
+		return;
+	m_phase = FffPhase::Revealed;
+	save();
+	emit changed();
+}
+
+void FffSession::clearRound()
+{
+	m_votes.clear();
+	m_phase = FffPhase::Collecting;
+	++m_round;
+	save();
+	emit changed();
+}
+
+void FffSession::setPort(quint16 port)
+{
+	if (m_port == port)
+		return;
+	m_port = port;
+	save();
+	emit changed();
+}
+
+void FffSession::setLayout(const FffLayout &layout)
+{
+	m_layout.x = qBound(0.0, layout.x, 1.0);
+	m_layout.y = qBound(0.0, layout.y, 1.0);
+	m_layout.scale = qBound(0.5, layout.scale, 2.0);
+	save();
+	emit changed();
+}
+
+bool FffSession::setPieceLayout(const QString &target, const FffLayout *layout)
+{
+	const auto previous = m_pieceLayouts;
+	if (layout)
+		m_pieceLayouts.insert(target, *layout);
+	else
+		m_pieceLayouts.remove(target);
+	if (!save()) {
+		m_pieceLayouts = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+bool FffSession::resetLayouts()
+{
+	const auto previous = m_pieceLayouts;
+	const FffLayout previousLayout = m_layout;
+	m_pieceLayouts.clear();
+	m_layout = FffLayout();
+	if (!save()) {
+		m_pieceLayouts = previous;
+		m_layout = previousLayout;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+QString FffSession::configDir() const
+{
+	char *path = obs_module_config_path("");
+	const QString dir = QString::fromUtf8(path ? path : "");
+	bfree(path);
+
+	if (!dir.isEmpty())
+		os_mkdirs(dir.toUtf8().constData());
+	return dir;
+}
+
+QString FffSession::photosDir() const
+{
+	const QString dir = QDir(configDir()).filePath(QStringLiteral("photos"));
+	os_mkdirs(dir.toUtf8().constData());
+	return dir;
+}
+
+QString FffSession::photoPath(const FffPresident &president) const
+{
+	if (president.photo.isEmpty())
+		return QString();
+	return QDir(photosDir()).filePath(president.photo);
+}
+
+QString FffSession::photoUrl(const FffPresident &president) const
+{
+	const QString path = photoPath(president);
+	if (path.isEmpty())
+		return QString();
+
+	// The mtime in the query string lets the overlay cache faces for a while
+	// and still pick up a picture swapped mid-event.
+	const QFileInfo info(path);
+	if (!info.exists())
+		return QString();
+	return QStringLiteral("/api/photo/%1?v=%2").arg(president.id).arg(info.lastModified().toSecsSinceEpoch());
+}
+
+QString FffSession::importPhoto(const QString &sourcePath, const QString &presidentId)
+{
+	const QFileInfo source(sourcePath);
+	if (!source.exists())
+		return QString();
+
+	QString suffix = source.suffix().toLower();
+	if (suffix.isEmpty())
+		suffix = QStringLiteral("png");
+
+	// Same president, new picture: drop whatever was there before so a
+	// changed extension does not leave an orphan behind.
+	const int index = indexOf(presidentId);
+	if (index >= 0) {
+		const QString previous = photoPath(m_presidents[index]);
+		if (!previous.isEmpty())
+			QFile::remove(previous);
+	}
+
+	const QString name = presidentId + QLatin1Char('.') + suffix;
+	const QString target = QDir(photosDir()).filePath(name);
+	QFile::remove(target);
+	if (!QFile::copy(sourcePath, target)) {
+		obs_log(LOG_WARNING, "could not copy photo to %s", target.toUtf8().constData());
+		return QString();
+	}
+	return name;
+}
+
+void FffSession::load()
+{
+	const QString path = QDir(configDir()).filePath(QStringLiteral("session.json"));
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly))
+		return;
+
+	const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+	file.close();
+	if (!document.isObject())
+		return;
+
+	const QJsonObject root = document.object();
+
+	m_presidents.clear();
+	const QJsonArray presidents = root.value(QStringLiteral("presidents")).toArray();
+	for (qsizetype i = 0; i < presidents.size(); ++i) {
+		const QJsonObject entry = presidents.at(i).toObject();
+		FffPresident president;
+		president.id = entry.value(QStringLiteral("id")).toString();
+		president.name = entry.value(QStringLiteral("name")).toString();
+		president.school = entry.value(QStringLiteral("school")).toString();
+		president.photo = entry.value(QStringLiteral("photo")).toString();
+		president.pin = entry.value(QStringLiteral("pin")).toString();
+		president.photoZoom = qBound(1.0, entry.value(QStringLiteral("photoZoom")).toDouble(1.0), 4.0);
+		president.photoX = qBound(-100.0, entry.value(QStringLiteral("photoX")).toDouble(0.0), 100.0);
+		president.photoY = qBound(-100.0, entry.value(QStringLiteral("photoY")).toDouble(0.0), 100.0);
+		if (!president.id.isEmpty())
+			m_presidents.append(president);
+	}
+
+	m_round = root.value(QStringLiteral("round")).toInt(1);
+	m_phase = root.value(QStringLiteral("phase")).toString() == QLatin1String("revealed") ? FffPhase::Revealed
+											      : FffPhase::Collecting;
+
+	const int port = root.value(QStringLiteral("port")).toInt(9779);
+	m_port = (port > 0 && port <= 65535) ? static_cast<quint16>(port) : 9779;
+
+	const QJsonObject layout = root.value(QStringLiteral("layout")).toObject();
+	m_layout.x = qBound(0.0, layout.value(QStringLiteral("x")).toDouble(0.5), 1.0);
+	m_layout.y = qBound(0.0, layout.value(QStringLiteral("y")).toDouble(0.5), 1.0);
+	m_layout.scale = qBound(0.5, layout.value(QStringLiteral("scale")).toDouble(1.0), 2.0);
+
+	m_pieceLayouts.clear();
+	const QJsonObject pieces = root.value(QStringLiteral("pieces")).toObject();
+	for (auto it = pieces.begin(); it != pieces.end(); ++it) {
+		if (it.key() != QLatin1String("heading") &&
+		    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
+			continue;
+		const QJsonObject value = it.value().toObject();
+		FffLayout piece;
+		piece.x = qBound(0.0, value.value(QStringLiteral("x")).toDouble(0.5), 1.0);
+		piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(0.5), 1.0);
+		piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(1.0), 2.0);
+		m_pieceLayouts.insert(it.key(), piece);
+	}
+
+	m_votes.clear();
+	const QJsonObject votes = root.value(QStringLiteral("votes")).toObject();
+	for (auto it = votes.begin(); it != votes.end(); ++it) {
+		const FffVote vote = voteFromName(it.value().toString());
+		if (vote != FffVote::None && indexOf(it.key()) >= 0)
+			m_votes.insert(it.key(), vote);
+	}
+
+	emit changed();
+}
+
+bool FffSession::save() const
+{
+	QJsonArray presidents;
+	for (const FffPresident &president : m_presidents) {
+		QJsonObject entry;
+		entry.insert(QStringLiteral("id"), president.id);
+		entry.insert(QStringLiteral("name"), president.name);
+		entry.insert(QStringLiteral("school"), president.school);
+		entry.insert(QStringLiteral("photo"), president.photo);
+		entry.insert(QStringLiteral("pin"), president.pin);
+		entry.insert(QStringLiteral("photoZoom"), president.photoZoom);
+		entry.insert(QStringLiteral("photoX"), president.photoX);
+		entry.insert(QStringLiteral("photoY"), president.photoY);
+		presidents.append(entry);
+	}
+
+	QJsonObject votes;
+	for (auto it = m_votes.begin(); it != m_votes.end(); ++it)
+		votes.insert(it.key(), voteName(it.value()));
+
+	QJsonObject root;
+	root.insert(QStringLiteral("version"), 1);
+	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
+	root.insert(QStringLiteral("round"), m_round);
+	root.insert(QStringLiteral("phase"),
+		    m_phase == FffPhase::Revealed ? QStringLiteral("revealed") : QStringLiteral("collecting"));
+	QJsonObject layout;
+	layout.insert(QStringLiteral("x"), m_layout.x);
+	layout.insert(QStringLiteral("y"), m_layout.y);
+	layout.insert(QStringLiteral("scale"), m_layout.scale);
+
+	root.insert(QStringLiteral("layout"), layout);
+	QJsonObject pieces;
+	for (auto it = m_pieceLayouts.begin(); it != m_pieceLayouts.end(); ++it) {
+		QJsonObject piece;
+		piece.insert(QStringLiteral("x"), it.value().x);
+		piece.insert(QStringLiteral("y"), it.value().y);
+		piece.insert(QStringLiteral("scale"), it.value().scale);
+		pieces.insert(it.key(), piece);
+	}
+	root.insert(QStringLiteral("pieces"), pieces);
+	root.insert(QStringLiteral("presidents"), presidents);
+	root.insert(QStringLiteral("votes"), votes);
+
+	const QString path = QDir(configDir()).filePath(QStringLiteral("session.json"));
+	QSaveFile file(path);
+	if (!file.open(QIODevice::WriteOnly)) {
+		obs_log(LOG_WARNING, "could not write %s", path.toUtf8().constData());
+		return false;
+	}
+	const QByteArray data = QJsonDocument(root).toJson(QJsonDocument::Indented);
+	if (file.write(data) != data.size() || !file.commit()) {
+		obs_log(LOG_WARNING, "could not commit %s", path.toUtf8().constData());
+		return false;
+	}
+	return true;
+}
+
+QByteArray FffSession::overlayStateJson() const
+{
+	QJsonArray presidents;
+	for (const FffPresident &president : m_presidents) {
+		QJsonObject entry;
+		entry.insert(QStringLiteral("id"), president.id);
+		entry.insert(QStringLiteral("name"), president.name);
+		entry.insert(QStringLiteral("school"), president.school);
+		entry.insert(QStringLiteral("photoUrl"), photoUrl(president));
+		entry.insert(QStringLiteral("photoZoom"), president.photoZoom);
+		entry.insert(QStringLiteral("photoX"), president.photoX);
+		entry.insert(QStringLiteral("photoY"), president.photoY);
+		entry.insert(QStringLiteral("vote"), voteName(voteOf(president.id)));
+		presidents.append(entry);
+	}
+
+	QJsonObject root;
+	root.insert(QStringLiteral("phase"),
+		    m_phase == FffPhase::Revealed ? QStringLiteral("revealed") : QStringLiteral("collecting"));
+	root.insert(QStringLiteral("round"), m_round);
+	root.insert(QStringLiteral("total"), m_presidents.size());
+	root.insert(QStringLiteral("voted"), votedCount());
+	root.insert(QStringLiteral("presidents"), presidents);
+
+	QJsonObject layout;
+	layout.insert(QStringLiteral("x"), m_layout.x);
+	layout.insert(QStringLiteral("y"), m_layout.y);
+	layout.insert(QStringLiteral("scale"), m_layout.scale);
+	root.insert(QStringLiteral("layout"), layout);
+	QJsonObject pieces;
+	for (auto it = m_pieceLayouts.begin(); it != m_pieceLayouts.end(); ++it) {
+		QJsonObject piece;
+		piece.insert(QStringLiteral("x"), it.value().x);
+		piece.insert(QStringLiteral("y"), it.value().y);
+		piece.insert(QStringLiteral("scale"), it.value().scale);
+		pieces.insert(it.key(), piece);
+	}
+	root.insert(QStringLiteral("pieces"), pieces);
+
+	return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}
+
+QByteArray FffSession::phoneStateJson(const QString &presidentId) const
+{
+	QJsonObject root;
+	root.insert(QStringLiteral("phase"),
+		    m_phase == FffPhase::Revealed ? QStringLiteral("revealed") : QStringLiteral("collecting"));
+	root.insert(QStringLiteral("round"), m_round);
+	root.insert(QStringLiteral("total"), m_presidents.size());
+	root.insert(QStringLiteral("voted"), votedCount());
+
+	// Only ever the caller's own president: nobody on a phone gets to peek
+	// at the other flags before the reveal.
+	const FffPresident *president = presidentById(presidentId);
+	if (president) {
+		QJsonObject you;
+		you.insert(QStringLiteral("id"), president->id);
+		you.insert(QStringLiteral("name"), president->name);
+		you.insert(QStringLiteral("school"), president->school);
+		you.insert(QStringLiteral("photoUrl"), photoUrl(*president));
+		you.insert(QStringLiteral("photoZoom"), president->photoZoom);
+		you.insert(QStringLiteral("photoX"), president->photoX);
+		you.insert(QStringLiteral("photoY"), president->photoY);
+		you.insert(QStringLiteral("vote"), voteName(voteOf(president->id)));
+		root.insert(QStringLiteral("you"), you);
+	}
+	return QJsonDocument(root).toJson(QJsonDocument::Compact);
+}

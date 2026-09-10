@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>FFF Flag Board</title>
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body class="phone">
+
+<div id="login" class="card">
+  <h1>ใส่ PIN ของคุณ</h1>
+  <input id="pin" class="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" />
+  <button id="enter" class="primary">เข้าใช้งาน</button>
+  <p id="loginError" class="status hidden">PIN ไม่ถูกต้อง</p>
+</div>
+
+<div id="vote" class="hidden">
+  <div class="card who">
+    <div class="face"><img id="face" alt="" /></div>
+    <div>
+      <div id="name" class="name"></div>
+      <div id="school" class="school"></div>
+    </div>
+  </div>
+
+  <div class="flags">
+    <button id="red" class="flag red">แดง</button>
+    <button id="green" class="flag green">เขียว</button>
+  </div>
+
+  <p id="status" class="status"></p>
+</div>
+
+<script>
+const KEY = "fff-token";
+const PIN_KEY = "fff-pin";
+let token = localStorage.getItem(KEY) || "";
+let savedPin = localStorage.getItem(PIN_KEY) || "";
+let reauthing = false;
+let desired = null;   // colour this phone wants the Mac to have
+let confirmed = null; // colour the Mac has acknowledged
+let lastState = null;
+let currentRound = null;
+let stream = null;
+let online = false;
+
+const el = (id) => document.getElementById(id);
+
+function show(which) {
+  el("login").classList.toggle("hidden", which !== "login");
+  el("vote").classList.toggle("hidden", which !== "vote");
+}
+
+function logout() {
+  localStorage.removeItem(KEY);
+  localStorage.removeItem(PIN_KEY);
+  token = "";
+  savedPin = "";
+  desired = confirmed = lastState = currentRound = null;
+  if (stream) { stream.close(); stream = null; }
+  show("login");
+}
+
+function paint(state) {
+  if (!state || !state.you) return;
+  lastState = state;
+
+  // A new round means the operator pressed Clear: drop last round's answer so
+  // the retry loop does not push it back into the fresh round.
+  if (currentRound !== null && state.round !== currentRound) desired = null;
+  currentRound = state.round;
+
+  confirmed = state.you.vote === "none" ? null : state.you.vote;
+  if (desired === null) desired = confirmed;
+
+  el("name").textContent = state.you.name || "";
+  el("school").textContent = state.you.school || "";
+
+  const face = el("face");
+  if (state.you.photoUrl) {
+    if (face.getAttribute("src") !== state.you.photoUrl) face.src = state.you.photoUrl;
+    face.hidden = false;
+    // Same framing formula the dock previewed and the overlay uses.
+    face.style.transform =
+      `translate(${state.you.photoX || 0}%, ${state.you.photoY || 0}%) scale(${state.you.photoZoom || 1})`;
+  } else {
+    face.removeAttribute("src");
+    face.hidden = true;
+  }
+
+  el("red").classList.toggle("picked", desired === "red");
+  el("green").classList.toggle("picked", desired === "green");
+
+  const phase = state.phase === "revealed" ? "ผลขึ้นจอแล้ว" : "รอครบทุกคน";
+  const sending = desired !== null && desired !== confirmed;
+  el("status").textContent = `${phase} · ส่งแล้ว ${state.voted}/${state.total}` + (sending ? " · กำลังส่ง…" : "");
+  el("status").classList.toggle("offline", !online || sending);
+}
+
+// The Mac forgets its tokens whenever the server restarts (OBS reopened, port
+// changed). Rather than throwing the watcher back to the PIN screen mid-event,
+// sign in again with the PIN they already gave us.
+async function reauth() {
+  if (reauthing || !savedPin) return false;
+  reauthing = true;
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: savedPin })
+    });
+    if (res.status === 401) { logout(); return false; }
+    if (!res.ok) return false;
+    const data = await res.json();
+    token = data.token;
+    localStorage.setItem(KEY, token);
+    paint(data.state);
+    listen();
+    return true;
+  } catch (err) {
+    return false; // Mac is unreachable, not a bad PIN. Keep the session.
+  } finally {
+    reauthing = false;
+  }
+}
+
+async function flush() {
+  if (!token || desired === null || desired === confirmed) return;
+  try {
+    const res = await fetch("/api/vote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token, color: desired })
+    });
+    if (res.status === 401) {
+      if (await reauth()) flush();
+      return;
+    }
+    if (!res.ok) return;
+    paint(await res.json());
+  } catch (err) {
+    // Offline: the 3s timer and the SSE reconnect both retry. The request is
+    // idempotent, so sending the same colour twice costs nothing.
+  }
+}
+
+function listen() {
+  if (stream) stream.close();
+  stream = new EventSource("/api/events?token=" + encodeURIComponent(token));
+  stream.onopen = () => { online = true; flush(); };
+  stream.onerror = () => {
+    online = false;
+    el("status").classList.add("offline");
+    el("status").textContent = "ขาดการเชื่อมต่อ — จะส่งให้เองเมื่อกลับมา";
+    // EventSource cannot see the status code, so a dead stream might mean the
+    // Mac is gone or that our token is. Try a sign-in; it no-ops if offline.
+    setTimeout(() => {
+      if (savedPin) reauth();
+      else logout(); // No PIN to sign back in with: ask for it again.
+    }, 3000);
+  };
+  stream.onmessage = (event) => {
+    online = true;
+    paint(JSON.parse(event.data));
+  };
+}
+
+function pick(colour) {
+  desired = colour;
+  if (lastState) paint(lastState);
+  flush();
+}
+
+el("red").onclick = () => pick("red");
+el("green").onclick = () => pick("green");
+
+el("enter").onclick = async () => {
+  const pin = el("pin").value.trim();
+  el("loginError").classList.add("hidden");
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pin })
+    });
+    if (!res.ok) {
+      el("loginError").textContent = "PIN ไม่ถูกต้อง";
+      el("loginError").classList.remove("hidden");
+      return;
+    }
+    const data = await res.json();
+    token = data.token;
+    savedPin = pin;
+    localStorage.setItem(KEY, token);
+    localStorage.setItem(PIN_KEY, pin);
+    desired = null;
+    show("vote");
+    paint(data.state);
+    listen();
+  } catch (err) {
+    el("loginError").textContent = "ต่อกับเครื่อง Mac ไม่ได้";
+    el("loginError").classList.remove("hidden");
+  }
+};
+
+el("pin").onkeydown = (event) => { if (event.key === "Enter") el("enter").click(); };
+
+setInterval(flush, 3000);
+
+// Keep the screen awake: a watcher who has to unlock the phone mid-round is a
+// watcher who misses the flag.
+async function keepAwake() {
+  try { await navigator.wakeLock.request("screen"); } catch (err) { /* unsupported */ }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") { keepAwake(); flush(); }
+});
+
+if (token) { show("vote"); listen(); } else { show("login"); }
+keepAwake();
+</script>
+</body>
+</html>

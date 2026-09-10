@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<title>FFF Flag Board — Overlay</title>
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body class="overlay">
+
+<div id="wrap" class="board-wrap" hidden>
+  <div class="piece heading-piece" data-target="heading"><div class="board-head">
+    <div class="title">ผลการออกธง</div>
+    <div id="meta" class="meta"></div>
+  </div></div>
+  <div id="board" class="board"></div>
+</div>
+
+<script src="/board.js"></script>
+<script>
+const wrap = document.getElementById("wrap");
+const board = document.getElementById("board");
+const meta = document.getElementById("meta");
+let lastPhase = null;
+
+function render(state) {
+  const revealed = state.phase === "revealed";
+  const justRevealed = revealed && lastPhase !== "revealed";
+  lastPhase = state.phase;
+
+  // Nothing at all on air until the operator says so.
+  wrap.hidden = !revealed;
+  if (!revealed) return;
+
+  meta.textContent = `รอบ ${state.round}`;
+  renderBoard(board, state, { revealed: true, justRevealed: justRevealed });
+  applyPieceLayouts(wrap, state);
+}
+
+const stream = new EventSource("/api/events/overlay");
+let lastState = null;
+stream.onmessage = (event) => { lastState = JSON.parse(event.data); render(lastState); };
+document.fonts.ready.then(() => { if (lastState) render(lastState); });
+</script>
+</body>
+</html>
