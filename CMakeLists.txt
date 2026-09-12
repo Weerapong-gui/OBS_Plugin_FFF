@@ -90,12 +90,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c src/tint-filter.c
 if(ENABLE_QT AND ENABLE_FRONTEND_API)
   target_sources(
     ${CMAKE_PROJECT_NAME}
-    PRIVATE
-      src/fff-dock.cpp
-      src/fff-http-server.cpp
-      src/fff-http-server.h
-      src/fff-session.cpp
-      src/fff-session.h
+    PRIVATE src/fff-dock.cpp src/fff-http-server.cpp src/fff-http-server.h src/fff-session.cpp src/fff-session.h
   )
   target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE FFF_ENABLE_DOCK)
 endif()

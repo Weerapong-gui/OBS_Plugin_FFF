@@ -28,28 +28,36 @@ bool FffSession::validCardTemplate(const QJsonObject &value)
 {
 	for (const QString &name : {QStringLiteral("image"), QStringLiteral("result")}) {
 		const auto layer = value.value(name).toObject();
-		for (const QString &key : {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
+		for (const QString &key :
+		     {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
 			const auto number = layer.value(key);
 			if (!number.isDouble() || !std::isfinite(number.toDouble()))
 				return false;
 			const double n = number.toDouble();
 			if (key == QLatin1String("x") || key == QLatin1String("y")) {
-				if (n < -2000 || n > 2000) return false;
-			} else if (n < 1 || n > 2000) return false;
+				if (n < -2000 || n > 2000)
+					return false;
+			} else if (n < 1 || n > 2000)
+				return false;
 		}
 	}
 	const auto order = value.value(QStringLiteral("order")).toArray();
-	return order.size() == 2 &&
-	       ((order.at(0).toString() == QLatin1String("result") && order.at(1).toString() == QLatin1String("image")) ||
-	        (order.at(0).toString() == QLatin1String("image") && order.at(1).toString() == QLatin1String("result")));
+	return order.size() == 2 && ((order.at(0).toString() == QLatin1String("result") &&
+				      order.at(1).toString() == QLatin1String("image")) ||
+				     (order.at(0).toString() == QLatin1String("image") &&
+				      order.at(1).toString() == QLatin1String("result")));
 }
 
 bool FffSession::setCardTemplate(const QJsonObject &value)
 {
-	if (!validCardTemplate(value)) return false;
+	if (!validCardTemplate(value))
+		return false;
 	const auto previous = m_cardTemplate;
 	m_cardTemplate = value;
-	if (!save()) { m_cardTemplate = previous; return false; }
+	if (!save()) {
+		m_cardTemplate = previous;
+		return false;
+	}
 	emit changed();
 	return true;
 }
@@ -485,7 +493,8 @@ bool FffSession::save() const
 
 	QJsonObject root;
 	root.insert(QStringLiteral("version"), 3);
-	if (!m_cardTemplate.isEmpty()) root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
+	if (!m_cardTemplate.isEmpty())
+		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
 	root.insert(QStringLiteral("round"), m_round);
 	root.insert(QStringLiteral("phase"),
@@ -552,7 +561,8 @@ QByteArray FffSession::overlayStateJson() const
 	root.insert(QStringLiteral("presidents"), presidents);
 
 	QJsonObject layout;
-	if (!m_cardTemplate.isEmpty()) root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
+	if (!m_cardTemplate.isEmpty())
+		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	layout.insert(QStringLiteral("x"), m_layout.x);
 	layout.insert(QStringLiteral("y"), m_layout.y);
 	layout.insert(QStringLiteral("scale"), m_layout.scale);

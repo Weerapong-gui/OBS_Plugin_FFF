@@ -73,7 +73,8 @@ int main(int argc, char **argv)
 	check(server.start(0, &error), "HTTP starts");
 	QNetworkAccessManager network;
 	auto post = [&](const QByteArray &body, const QString &endpoint = QStringLiteral("layout")) {
-		QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/api/%2").arg(server.boundPort()).arg(endpoint)));
+		QNetworkRequest request(
+			QUrl(QStringLiteral("http://127.0.0.1:%1/api/%2").arg(server.boundPort()).arg(endpoint)));
 		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
 		auto *reply = network.post(request, body);
 		QEventLoop loop;
@@ -129,7 +130,8 @@ int main(int argc, char **argv)
 	check(postLayer(R"({"target":"card:one","action":"sideways"})") == 400, "invalid layer action rejected");
 	check(postLayer(R"({"target":"card:missing","action":"front"})") == 404, "unknown layer target rejected");
 	session.setVote(person.id, FffVote::Red);
-	const QByteArray cardTemplate = R"({"image":{"x":0,"y":0,"width":416,"height":148},"result":{"x":35,"y":-20,"width":220,"height":100},"order":["result","image"]})";
+	const QByteArray cardTemplate =
+		R"({"image":{"x":0,"y":0,"width":416,"height":148},"result":{"x":35,"y":-20,"width":220,"height":100},"order":["result","image"]})";
 	check(post(cardTemplate, QStringLiteral("template")) == 200, "template API saves");
 	check(post(R"({"image":{}})", QStringLiteral("template")) == 400, "invalid template rejected");
 	const auto savedTemplate = state(session).value("cardTemplate");
@@ -165,7 +167,8 @@ int main(int argc, char **argv)
 	auto resultLayer = changedTemplate.value("result").toObject();
 	resultLayer.insert("x", 100);
 	changedTemplate.insert("result", resultLayer);
-	check(post(QJsonDocument(changedTemplate).toJson(), QStringLiteral("template")) == 500, "failed template write reported");
+	check(post(QJsonDocument(changedTemplate).toJson(), QStringLiteral("template")) == 500,
+	      "failed template write reported");
 	check(post(R"({"target":"heading","reset":true})") == 500, "failed write reported");
 	check(post(R"({"target":"all","reset":true})") == 500, "failed reset reported");
 	check(state(session) == beforeFailure, "failed saves roll back");

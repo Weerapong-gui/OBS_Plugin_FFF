@@ -279,7 +279,8 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/template-editor.js")) {
-			sendWebFile(socket, QStringLiteral("template-editor.js"), "application/javascript; charset=utf-8");
+			sendWebFile(socket, QStringLiteral("template-editor.js"),
+				    "application/javascript; charset=utf-8");
 			return;
 		}
 		if (path == QLatin1String("/api/events/overlay")) {
@@ -446,7 +447,7 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 			piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(), 1.0);
 			piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(), 2.0);
 			for (const QString &key : {QStringLiteral("scaleX"), QStringLiteral("scaleY"),
-						 QStringLiteral("resultScaleX"), QStringLiteral("resultScaleY")}) {
+						   QStringLiteral("resultScaleX"), QStringLiteral("resultScaleY")}) {
 				if (value.contains(key) &&
 				    (!value.value(key).isDouble() || !std::isfinite(value.value(key).toDouble()))) {
 					sendJson(socket, 400, "{\"error\":\"invalid layout\"}");
