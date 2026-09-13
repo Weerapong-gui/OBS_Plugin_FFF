@@ -55,20 +55,6 @@ QByteArray reasonPhrase(int code)
 	}
 }
 
-QByteArray mimeForSuffix(const QString &suffix)
-{
-	const QString lower = suffix.toLower();
-	if (lower == QLatin1String("png"))
-		return "image/png";
-	if (lower == QLatin1String("jpg") || lower == QLatin1String("jpeg"))
-		return "image/jpeg";
-	if (lower == QLatin1String("gif"))
-		return "image/gif";
-	if (lower == QLatin1String("webp"))
-		return "image/webp";
-	return "application/octet-stream";
-}
-
 QString randomToken()
 {
 	QRandomGenerator *generator = QRandomGenerator::system();
@@ -86,7 +72,7 @@ FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(par
 	connect(m_heartbeat, &QTimer::timeout, this, &FffHttpServer::sendHeartbeat);
 
 	connect(m_session, &FffSession::changed, this, [this]() {
-		m_photoCache.clear();
+		m_cardCache.clear();
 		pushState();
 	});
 }
@@ -132,7 +118,7 @@ void FffHttpServer::stop()
 
 	m_tokens.clear();
 	m_fileCache.clear();
-	m_photoCache.clear();
+	m_cardCache.clear();
 
 	if (m_server) {
 		m_server->close();
@@ -292,6 +278,11 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendWebFile(socket, QStringLiteral("board.js"), "application/javascript; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/template-editor.js")) {
+			sendWebFile(socket, QStringLiteral("template-editor.js"),
+				    "application/javascript; charset=utf-8");
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
 			// The overlay sees every flag before the reveal, so it is
 			// only ever served to OBS on this machine.
@@ -310,11 +301,25 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			startSse(socket, token, false);
 			return;
 		}
-		if (path.startsWith(QLatin1String("/api/photo/"))) {
-			sendPhoto(socket, path.mid(QStringLiteral("/api/photo/").size()));
+		if (path.startsWith(QLatin1String("/api/card/"))) {
+			sendCard(socket, path.mid(QStringLiteral("/api/card/").size()));
 			return;
 		}
 	} else if (method == "POST") {
+		if (path == QLatin1String("/api/template")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "template is local only");
+				return;
+			}
+			const auto value = QJsonDocument::fromJson(body).object();
+			if (!FffSession::validCardTemplate(value)) {
+				sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+				return;
+			}
+			const bool saved = m_session->setCardTemplate(value);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
 		if (path == QLatin1String("/api/auth")) {
 			handleAuth(socket, body);
 			return;
@@ -323,12 +328,28 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			handleVote(socket, body);
 			return;
 		}
+		if (path == QLatin1String("/api/operator/vote")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "operator controls are local only");
+				return;
+			}
+			handleOperatorVote(socket, body);
+			return;
+		}
 		if (path == QLatin1String("/api/layout")) {
 			if (!socket->peerAddress().isLoopback()) {
 				send(socket, 403, "text/plain; charset=utf-8", "layout is local only");
 				return;
 			}
 			handleLayout(socket, body);
+			return;
+		}
+		if (path == QLatin1String("/api/layer")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "layer controls are local only");
+				return;
+			}
+			handleLayer(socket, body);
 			return;
 		}
 	}
@@ -384,6 +405,19 @@ void FffHttpServer::handleVote(QTcpSocket *socket, const QByteArray &body)
 	sendJson(socket, 200, m_session->phoneStateJson(presidentId));
 }
 
+void FffHttpServer::handleOperatorVote(QTcpSocket *socket, const QByteArray &body)
+{
+	const QJsonObject request = QJsonDocument::fromJson(body).object();
+	const QString presidentId = request.value(QStringLiteral("presidentId")).toString();
+	const FffVote vote = FffSession::voteFromName(request.value(QStringLiteral("color")).toString());
+	if (!m_session->presidentById(presidentId)) {
+		sendJson(socket, 404, "{\"error\":\"president is gone\"}");
+		return;
+	}
+	m_session->setVote(presidentId, vote);
+	sendJson(socket, 200, "{\"ok\":true}");
+}
+
 void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 {
 	const QJsonObject request = QJsonDocument::fromJson(body).object();
@@ -412,6 +446,20 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 			piece.x = qBound(0.0, value.value(QStringLiteral("x")).toDouble(), 1.0);
 			piece.y = qBound(0.0, value.value(QStringLiteral("y")).toDouble(), 1.0);
 			piece.scale = qBound(0.5, value.value(QStringLiteral("scale")).toDouble(), 2.0);
+			for (const QString &key : {QStringLiteral("scaleX"), QStringLiteral("scaleY"),
+						   QStringLiteral("resultScaleX"), QStringLiteral("resultScaleY")}) {
+				if (value.contains(key) &&
+				    (!value.value(key).isDouble() || !std::isfinite(value.value(key).toDouble()))) {
+					sendJson(socket, 400, "{\"error\":\"invalid layout\"}");
+					return;
+				}
+			}
+			piece.scaleX = qBound(0.5, value.value(QStringLiteral("scaleX")).toDouble(piece.scale), 2.0);
+			piece.scaleY = qBound(0.5, value.value(QStringLiteral("scaleY")).toDouble(piece.scale), 2.0);
+			piece.resultScaleX =
+				qBound(0.5, value.value(QStringLiteral("resultScaleX")).toDouble(1.0), 2.0);
+			piece.resultScaleY =
+				qBound(0.5, value.value(QStringLiteral("resultScaleY")).toDouble(1.0), 2.0);
 		}
 		const bool saved = m_session->setPieceLayout(target, reset ? nullptr : &piece);
 		sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
@@ -428,6 +476,25 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 
 	m_session->setLayout(layout);
 	sendJson(socket, 200, "{\"ok\":true}");
+}
+
+void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
+{
+	const QJsonObject request = QJsonDocument::fromJson(body).object();
+	const QString target = request.value(QStringLiteral("target")).toString();
+	const QString action = request.value(QStringLiteral("action")).toString();
+	if (target != QLatin1String("heading") &&
+	    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+		sendJson(socket, 404, "{\"error\":\"unknown layer target\"}");
+		return;
+	}
+	if (action != QLatin1String("front") && action != QLatin1String("forward") &&
+	    action != QLatin1String("backward") && action != QLatin1String("back")) {
+		sendJson(socket, 400, "{\"error\":\"invalid layer action\"}");
+		return;
+	}
+	const bool saved = m_session->movePieceLayer(target, action);
+	sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 }
 
 void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay)
@@ -530,23 +597,22 @@ void FffHttpServer::sendWebFile(QTcpSocket *socket, const QString &name, const Q
 	send(socket, 200, contentType, m_fileCache.value(name));
 }
 
-void FffHttpServer::sendPhoto(QTcpSocket *socket, const QString &presidentId)
+void FffHttpServer::sendCard(QTcpSocket *socket, const QString &presidentId)
 {
 	const FffPresident *president = m_session->presidentById(presidentId);
-	if (!president || president->photo.isEmpty()) {
-		send(socket, 404, "text/plain; charset=utf-8", "no photo");
+	if (!president || president->card.isEmpty()) {
+		send(socket, 404, "text/plain; charset=utf-8", "no card");
 		return;
 	}
 
-	if (!m_photoCache.contains(presidentId)) {
-		QFile file(m_session->photoPath(*president));
+	if (!m_cardCache.contains(presidentId)) {
+		QFile file(m_session->cardPath(*president));
 		if (!file.open(QIODevice::ReadOnly)) {
-			send(socket, 404, "text/plain; charset=utf-8", "no photo");
+			send(socket, 404, "text/plain; charset=utf-8", "no card");
 			return;
 		}
-		m_photoCache.insert(presidentId, file.readAll());
+		m_cardCache.insert(presidentId, file.readAll());
 	}
 
-	send(socket, 200, mimeForSuffix(QFileInfo(president->photo).suffix()), m_photoCache.value(presidentId),
-	     "public, max-age=300");
+	send(socket, 200, "image/png", m_cardCache.value(presidentId), "public, max-age=300");
 }

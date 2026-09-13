@@ -8,6 +8,7 @@ GPL-2.0-or-later
 
 #include <QByteArray>
 #include <QHash>
+#include <QJsonObject>
 #include <QObject>
 #include <QString>
 #include <QVector>
@@ -20,16 +21,8 @@ struct FffPresident {
 	QString id;
 	QString name;
 	QString school;
-	QString photo;
+	QString card;
 	QString pin;
-
-	// Non-destructive framing: the original file is never touched. Both the
-	// dock preview and the CSS apply these as
-	//   object-fit: cover; transform: translate(photoX%, photoY%) scale(photoZoom)
-	// so what the operator frames is what goes on air.
-	double photoZoom = 1.0; // 1.0 - 4.0
-	double photoX = 0.0;    // pan, percent of the frame, +-(zoom-1)/2*100
-	double photoY = 0.0;
 };
 
 // Centre and scale on the 1920x1080 canvas, used for both the legacy board
@@ -38,6 +31,13 @@ struct FffLayout {
 	double x = 0.5;
 	double y = 0.5;
 	double scale = 1.0;
+	// scale is retained for old saved sessions and the whole-board layout.
+	// Piece overrides can stretch independently on each axis.
+	double scaleX = 1.0;
+	double scaleY = 1.0;
+	// Cards may resize their red/green result backdrop without scaling the PNG.
+	double resultScaleX = 1.0;
+	double resultScaleY = 1.0;
 };
 
 /*
@@ -77,11 +77,15 @@ public:
 	// "heading" or "card:<id>"; nullptr removes an override to use the grid.
 	bool setPieceLayout(const QString &target, const FffLayout *layout);
 	bool resetLayouts();
+	static bool validCardTemplate(const QJsonObject &value);
+	bool setCardTemplate(const QJsonObject &value);
+	// Moves "heading" or "card:<id>" within the persisted stacking order.
+	bool movePieceLayer(const QString &target, const QString &action);
 
-	QString photosDir() const;
-	QString photoPath(const FffPresident &president) const;
-	QString photoUrl(const FffPresident &president) const;
-	QString importPhoto(const QString &sourcePath, const QString &presidentId);
+	QString cardsDir() const;
+	QString cardPath(const FffPresident &president) const;
+	QString cardUrl(const FffPresident &president) const;
+	QString importCard(const QString &sourcePath, const QString &presidentId);
 
 	void load();
 	bool save() const;
@@ -108,4 +112,6 @@ private:
 	quint16 m_port = 9779;
 	FffLayout m_layout;
 	QHash<QString, FffLayout> m_pieceLayouts;
+	QHash<QString, int> m_pieceLayers;
+	QJsonObject m_cardTemplate;
 };

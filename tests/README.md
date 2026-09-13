@@ -44,3 +44,8 @@ return 400, unknown targets return 404, and failed saves return 500.
 grid to centre/100%. Requests without a target retain the original whole-board
 layout API. Session JSON and overlay SSE add a `pieces` object keyed by these
 targets; absent entries use the existing grid and legacy `layout` values.
+
+`POST /api/layer` ก็เป็น localhost-only และรับ
+`{"target":"card:<president-id>","action":"front|forward|backward|back"}`
+เพื่อจัดลำดับซ้อนของการ์ดหรือ `heading` แบบบันทึกถาวร. SSE state ส่ง `layers`
+เป็น map ของ target ไปยัง z-index; reset all ล้าง map นี้.

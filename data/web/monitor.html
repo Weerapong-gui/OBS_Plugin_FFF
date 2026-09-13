@@ -14,6 +14,7 @@
   <div id="warn" class="bar-warn hidden">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
 </div>
 
+<div class="monitor-workspace"><section class="board-panel">
 <div id="frame" class="frame">
   <div id="canvas" class="canvas" tabindex="0" aria-label="พื้นที่จัดตำแหน่งการ์ด">
     <div class="guide guide-v" data-guide="cx"></div>
@@ -24,29 +25,68 @@
     <div class="guide guide-h" data-guide="h2"></div>
 
     <div id="wrap" class="board-wrap">
-      <div class="piece heading-piece" data-target="heading"><div class="board-head">
-        <div class="title">ผลการออกธง</div>
-        <div id="meta" class="meta"></div>
-      </div></div>
       <div id="board" class="board"></div>
     </div>
   </div>
 </div>
 
 <div class="controls">
-  <label>เลือก <select id="selection"><option value="heading">หัวข้อและเลขรอบ</option></select></label>
+  <label>เลือก <select id="selection"></select></label>
+  <label><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
   <button id="centerX">กึ่งกลางแนวนอน</button>
   <button id="centerY">กึ่งกลางแนวตั้ง</button>
   <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
   <button id="resetAll">รีเซ็ตทั้งหมด</button>
-  <label>ขนาด <input id="scale" type="range" min="50" max="200" step="1" /></label>
-  <span id="scaleValue"></span>
+  <label hidden><span id="scaleXLabel">กว้าง</span> <input id="scaleX" type="range" min="50" max="200" step="1" /></label>
+  <span id="scaleXValue" hidden></span>
+  <label hidden><span id="scaleYLabel">สูง</span> <input id="scaleY" type="range" min="50" max="200" step="1" /></label>
+  <span id="scaleYValue" hidden></span>
+  <span class="layer-controls">Layer
+    <button data-layer="front">หน้าสุด</button>
+    <button data-layer="forward">ขึ้น</button>
+    <button data-layer="backward">ลง</button>
+    <button data-layer="back">หลังสุด</button>
+  </span>
   <span id="symmetry" class="symmetry"></span>
 </div>
+<div id="cardControls" class="piece-options" hidden>
+  <span class="flag-controls">กำหนดธง
+    <button class="flag-none" data-vote="none">ยังไม่กำหนด</button>
+    <button class="flag-green" data-vote="green">เขียว</button>
+    <button class="flag-red" data-vote="red">แดง</button>
+  </span>
+</div>
 <p id="saveStatus" class="hint" role="status"></p>
-<p class="hint">เลือกการ์ดหรือหัวข้อแล้วลาก · ลูกศร 1px · Shift+ลูกศร 10px · ปล่อยแล้วบันทึกเอง · เลือกชิ้นที่ถูกบังได้จากรายชื่อ</p>
+<p class="hint">เลือกการ์ดแล้วลาก · ตารางช่องละ 60px · ลูกศร 1px · Shift+ลูกศร 10px · แก้พื้นสีและ PNG ในแม่แบบด้านขวา</p>
+</section>
+<aside class="template-panel">
+  <h2>แม่แบบทุกการ์ด</h2>
+  <p>แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
+  <div class="template-toolbar">
+    <button id="templateZoomOut">−</button><output id="templateZoomValue"></output>
+    <button id="templateZoomIn">+</button><button id="templateFit">พอดีจอ</button>
+    <label>ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
+  </div>
+  <div id="templateViewport"><div id="templateStage">
+    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div></div>
+    <div id="templatePlaceholder">PNG ของแต่ละการ์ด</div>
+    <div id="templateSelection"><button id="templateResize" aria-label="ลากปรับขนาด"></button></div>
+  </div></div>
+  <p class="hint">ลากเพื่อย้าย · ลากมุมเพื่อปรับขนาด · Shift + ลากมุม เพื่อรักษาสัดส่วน · เลเยอร์บนสุดอยู่ด้านหน้า</p>
+  <div id="templateLayers" role="group" aria-label="เลเยอร์แม่แบบ"></div>
+  <div class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div class="template-fields">
+    <label>X <input id="templateX" type="number" min="-2000" max="2000" step="1" /></label>
+    <label>Y <input id="templateY" type="number" min="-2000" max="2000" step="1" /></label>
+    <label>กว้าง <input id="templateWidth" type="number" min="1" max="2000" step="1" /></label>
+    <label>สูง <input id="templateHeight" type="number" min="1" max="2000" step="1" /></label>
+  </div>
+  <div class="template-toolbar"><button id="templateApply">ใช้แม่แบบกับทุกการ์ด</button><button id="templateCancel">ยกเลิกการแก้ไข</button></div>
+  <p id="templateStatus" role="status"></p>
+</aside></div>
 
 <script src="/board.js"></script>
+<script src="/template-editor.js"></script>
 <script>
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
@@ -56,18 +96,22 @@ const frame = document.getElementById("frame");
 const canvas = document.getElementById("canvas");
 const wrap = document.getElementById("wrap");
 const board = document.getElementById("board");
-const meta = document.getElementById("meta");
 const statusEl = document.getElementById("status");
 const warn = document.getElementById("warn");
-const scaleInput = document.getElementById("scale");
-const scaleValue = document.getElementById("scaleValue");
+const scaleXInput = document.getElementById("scaleX");
+const scaleYInput = document.getElementById("scaleY");
+const scaleXLabel = document.getElementById("scaleXLabel");
+const scaleYLabel = document.getElementById("scaleYLabel");
+const scaleXValue = document.getElementById("scaleXValue");
+const scaleYValue = document.getElementById("scaleYValue");
 const symmetry = document.getElementById("symmetry");
 const selection = document.getElementById("selection");
 const saveStatus = document.getElementById("saveStatus");
+const cardControls = document.getElementById("cardControls");
 
 let lastState = null;
 let pieces = new Map();
-let selected = "heading";
+let selected = "";
 let lastPhase = null;
 let dragging = false;
 let dragStart = null;
@@ -75,6 +119,9 @@ let layoutStart = null;
 let draft = null;
 let saving = false;
 const pending = new Map();
+const showGrid = document.getElementById("showGrid");
+showGrid.onchange = () => canvas.classList.toggle("show-grid", showGrid.checked);
+showGrid.onchange();
 
 function fitCanvas() {
   const factor = frame.clientWidth / CANVAS_W;
@@ -84,11 +131,12 @@ function fitCanvas() {
 window.addEventListener("resize", () => { fitCanvas(); apply(); });
 
 function projectedState() {
-  const state = { ...lastState, pieces: { ...lastState.pieces } };
+  const state = { ...lastState, pieces: { ...lastState.pieces }, layers: { ...lastState.layers } };
   for (const request of pending.values()) {
     if (request.target === "all") {
       state.layout = { x: 0.5, y: 0.5, scale: 1 };
       state.pieces = {};
+      state.layers = {};
     } else if (request.reset) {
       delete state.pieces[request.target];
     } else {
@@ -106,18 +154,30 @@ function apply() {
   for (const [key, piece] of pieces)
     piece.element.classList.toggle("selected", key === selected);
   const piece = pieces.get(selected);
-  for (const id of ["centerX", "centerY", "reset", "scale"])
+  for (const id of ["centerX", "centerY", "reset", "scaleX", "scaleY"])
     document.getElementById(id).disabled = !piece;
-  if (!piece) { symmetry.textContent = ""; scaleValue.textContent = ""; return; }
+  for (const button of document.querySelectorAll("[data-layer]"))
+    button.disabled = !piece;
+  cardControls.hidden = !piece;
+  templateEditor.update(lastState, selected);
+  if (!piece) { symmetry.textContent = ""; scaleXValue.textContent = ""; scaleYValue.textContent = ""; return; }
   const layout = piece.layout;
-  scaleInput.value = Math.round(layout.scale * 100);
-  scaleValue.textContent = Math.round(layout.scale * 100) + "%";
-  const width = piece.element.offsetWidth * layout.scale;
+  const isCard = selected.startsWith("card:");
+  const scaleX = isCard ? layout.resultScaleX : layout.scaleX;
+  const scaleY = isCard ? layout.resultScaleY : layout.scaleY;
+  scaleXLabel.textContent = isCard ? "พื้นผลธง กว้าง" : "กว้าง";
+  scaleYLabel.textContent = isCard ? "พื้นผลธง สูง" : "สูง";
+  scaleXInput.value = Math.round(scaleX * 100);
+  scaleYInput.value = Math.round(scaleY * 100);
+  scaleXValue.textContent = Math.round(scaleX * 100) + "%";
+  scaleYValue.textContent = Math.round(scaleY * 100) + "%";
+  const width = piece.element.offsetWidth * layout.scaleX * (isCard ? scaleX : 1);
   const left = Math.round(layout.x * CANVAS_W - width / 2);
   const right = Math.round(CANVAS_W - (layout.x * CANVAS_W + width / 2));
   const balanced = Math.abs(left - right) <= 2;
   symmetry.textContent = `ซ้าย ${left} · ขวา ${right} ${balanced ? "✓" : ""}`;
   symmetry.classList.toggle("ok", balanced);
+  cardControls.hidden = !isCard;
 }
 
 function showGuides(active) {
@@ -185,7 +245,10 @@ function queue(request) {
 function startDraft() {
   const piece = pieces.get(selected);
   if (!piece) return false;
-  if (!draft) draft = { target: selected, layout: { ...piece.layout } };
+  if (!draft) {
+    const defaults = { scale: 1, scaleX: 1, scaleY: 1, resultScaleX: 1, resultScaleY: 1 };
+    draft = { target: selected, layout: { ...defaults, ...piece.layout } };
+  }
   return true;
 }
 
@@ -194,7 +257,11 @@ function commitDraft() {
   const request = draft;
   request.layout.x = Math.min(1, Math.max(0, request.layout.x));
   request.layout.y = Math.min(1, Math.max(0, request.layout.y));
-  request.layout.scale = Math.min(2, Math.max(0.5, request.layout.scale));
+  request.layout.scale = 1;
+  request.layout.scaleX = Math.min(2, Math.max(0.5, request.layout.scaleX));
+  request.layout.scaleY = Math.min(2, Math.max(0.5, request.layout.scaleY));
+  request.layout.resultScaleX = Math.min(2, Math.max(0.5, request.layout.resultScaleX));
+  request.layout.resultScaleY = Math.min(2, Math.max(0.5, request.layout.resultScaleY));
   draft = null;
   queue(request);
 }
@@ -280,29 +347,75 @@ document.getElementById("resetAll").onclick = () => {
   pending.clear();
   queue({ target: "all", reset: true });
 };
-scaleInput.oninput = () => {
-  if (startDraft()) { draft.layout.scale = scaleInput.value / 100; apply(); }
+scaleXInput.oninput = () => {
+  if (startDraft()) {
+    draft.layout[selected.startsWith("card:") ? "resultScaleX" : "scaleX"] = scaleXInput.value / 100;
+    apply();
+  }
 };
-scaleInput.onchange = commitDraft;
+scaleXInput.onchange = commitDraft;
+scaleYInput.oninput = () => {
+  if (startDraft()) {
+    draft.layout[selected.startsWith("card:") ? "resultScaleY" : "scaleY"] = scaleYInput.value / 100;
+    apply();
+  }
+};
+scaleYInput.onchange = commitDraft;
+
+for (const button of document.querySelectorAll("[data-vote]")) {
+  button.onclick = async () => {
+    if (!selected.startsWith("card:")) return;
+    button.disabled = true;
+    try {
+      const res = await fetch("/api/operator/vote", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ presidentId: selected.slice(5), color: button.dataset.vote })
+      });
+      if (!res.ok) throw new Error("vote failed");
+      saveStatus.textContent = "ตั้งค่าสีธงแล้ว";
+    } catch (err) {
+      saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ — ลองใหม่อีกครั้ง";
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+
+for (const button of document.querySelectorAll("[data-layer]")) {
+  button.onclick = async () => {
+    if (!pieces.has(selected)) return;
+    button.disabled = true;
+    try {
+      const res = await fetch("/api/layer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: selected, action: button.dataset.layer })
+      });
+      if (!res.ok) throw new Error("layer failed");
+      saveStatus.textContent = "บันทึกลำดับ layer แล้ว";
+    } catch (err) {
+      saveStatus.textContent = "บันทึกลำดับ layer ไม่ได้ — ลองใหม่อีกครั้ง";
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
 
 function render(state) {
   lastState = state;
   if (!state.pieces) state.pieces = {};
+  if (!state.layers) state.layers = {};
   const revealed = state.phase === "revealed";
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
 
-  // Identical text and geometry to the overlay; live counts live in the bar.
-  meta.textContent = `รอบ ${state.round}`;
   statusEl.textContent = revealed
-    ? `รอบ ${state.round} · ขึ้นจอแล้ว`
-    : `รอบ ${state.round} · ส่งแล้ว ${state.voted}/${state.total} · ยังไม่ขึ้นจอ`;
+    ? "ขึ้นจอแล้ว"
+    : `ส่งแล้ว ${state.voted}/${state.total} · ยังไม่ขึ้นจอ`;
 
   // Never blanks: this is what the operator watches while the stream is clean.
-  renderBoard(board, state, { revealed: revealed, justRevealed: justRevealed });
+  renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
 
-  const choices = [["heading", "หัวข้อและเลขรอบ"],
-    ...state.presidents.map((p) => ["card:" + p.id, p.name + " — " + p.school])];
+  const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " — " + p.school]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
     selection.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));
@@ -316,7 +429,7 @@ function render(state) {
     draft = null;
     dragging = false;
     showGuides(new Set());
-    selected = "heading";
+    selected = choices[0]?.[0] || "";
   }
   selection.value = selected;
   apply();
