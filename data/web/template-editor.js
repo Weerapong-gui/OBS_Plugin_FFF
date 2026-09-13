@@ -10,9 +10,11 @@
   function initial() {
     if (state?.cardTemplate) return clone(state.cardTemplate);
     const layout = state?.pieces?.[selectedCard] || {};
-    const width = 416 * (layout.resultScaleX || 1), height = 148 * (layout.resultScaleY || 1);
-    return { image: { x: 0, y: 0, width: 416, height: 148 },
-      result: { x: (416 - width) / 2, y: (148 - height) / 2, width, height },
+    const baseWidth = state?.mode === "bottomBar" ? 850 / Math.max(1, Math.ceil(state.presidents.length / 2)) : 416;
+    const baseHeight = state?.mode === "bottomBar" ? 250 : 148;
+    const width = baseWidth * (layout.resultScaleX || 1), height = baseHeight * (layout.resultScaleY || 1);
+    return { image: { x: 0, y: 0, width: baseWidth, height: baseHeight },
+      result: { x: (baseWidth - width) / 2, y: (baseHeight - height) / 2, width, height },
       order: ["result", "image"] };
   }
   function position(element, box) {
@@ -21,13 +23,14 @@
   function paint() {
     if (!draft) return;
     applyCardTemplate(slot, draft);
-    slot.className = "slot " + el("templateColor").value;
+    slot.className = "slot " + el("templateColor").value + (state?.mode === "bottomBar" ? " bottom-template" : "");
     const person = state?.presidents.find(p => "card:" + p.id === selectedCard);
     const image = slot.querySelector("img");
-    if (person?.cardUrl) { if (image.getAttribute("src") !== person.cardUrl) image.src = person.cardUrl; }
+    const url = state?.mode === "bottomBar" ? person?.bottomBarUrl : person?.cardUrl;
+    if (url) { if (image.getAttribute("src") !== url) image.src = url; }
     else image.removeAttribute("src");
-    image.hidden = !person?.cardUrl;
-    placeholder.hidden = !!person?.cardUrl;
+    image.hidden = !url;
+    placeholder.hidden = !!url;
     position(placeholder, draft.image);
     placeholder.style.zIndex = String(draft.order.indexOf("image"));
     position(outline, draft[active]);
@@ -43,17 +46,26 @@
     }));
     for (const [key, input] of Object.entries(fields))
       if (document.activeElement !== input) input.value = Math.round(draft[active][key]);
+    el("templateOpacity").value = Math.round((draft[active].opacity ?? 1) * 100);
     el("templateApply").disabled = !dirty || saving;
     el("templateCancel").disabled = saving;
     el("templateUp").disabled = saving || draft.order.indexOf(active) === 1;
     el("templateDown").disabled = saving || draft.order.indexOf(active) === 0;
   }
   function changed() { dirty = true; el("templateStatus").textContent = "ร่างยังไม่ใช้กับทุกการ์ด"; paint(); }
-  function fit() { zoom = clamp((viewport.clientWidth - 100) / 420, 0.25, 4); paint(); }
+  function fit() {
+    const width = draft ? Math.max(draft.image.x + draft.image.width, draft.result.x + draft.result.width) : 420;
+    const height = draft ? Math.max(draft.image.y + draft.image.height, draft.result.y + draft.result.height) : 152;
+    zoom = clamp(Math.min((viewport.clientWidth - 100) / Math.max(width, 1), (viewport.clientHeight - 110) / Math.max(height, 1)), 0.25, 4); paint();
+  }
   el("templateFit").onclick = fit;
   el("templateZoomIn").onclick = () => { zoom = clamp(zoom * 1.25, 0.25, 4); paint(); };
   el("templateZoomOut").onclick = () => { zoom = clamp(zoom / 1.25, 0.25, 4); paint(); };
   el("templateColor").onchange = paint;
+  el("templateOpacity").onchange = event => {
+    if (saving || !Number.isFinite(event.target.valueAsNumber)) return;
+    draft[active].opacity = clamp(event.target.valueAsNumber / 100, 0, 1); changed();
+  };
   for (const [key, input] of Object.entries(fields)) input.onchange = () => {
     if (saving) return;
     const n = input.valueAsNumber;
@@ -113,21 +125,26 @@
   el("templateCancel").onclick = () => { dirty = false; draft = initial(); el("templateStatus").textContent = ""; paint(); };
   el("templateApply").onclick = async () => {
     if (saving || !dirty) return;
+    const requestMode = state.mode, submitted = clone(draft), savedState = state;
     saving = true; paint();
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await fetch("/api/template", { method: "POST",
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft), signal: controller.signal });
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...submitted, mode: requestMode }), signal: controller.signal });
       if (!response.ok) throw new Error("save failed");
-      state.cardTemplate = clone(draft);
+      savedState.cardTemplate = submitted;
+      if (state.mode !== requestMode) return;
+      state.cardTemplate = submitted;
+      draft = clone(submitted);
       dirty = false;
       el("templateStatus").textContent = "ใช้แม่แบบกับทุกการ์ดแล้ว";
-    } catch (error) { el("templateStatus").textContent = "บันทึกไม่สำเร็จ — ร่างยังอยู่ กดใช้เพื่อลองใหม่"; }
+    } catch (error) { if (state.mode === requestMode) { dirty = false; draft = initial(); el("templateStatus").textContent = "บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว"; } }
     finally { clearTimeout(timer); saving = false; paint(); }
   };
   window.templateEditor = { update(next, card) {
+    if (state?.mode !== next.mode) { dirty = false; drag = null; draft = null; el("templateStatus").textContent = ""; }
     state = next; selectedCard = card;
-    if (!dirty && !saving) draft = initial();
+    if (!draft || (!dirty && !saving)) draft = initial();
     paint();
   }};
   new ResizeObserver(fit).observe(viewport);

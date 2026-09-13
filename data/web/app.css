@@ -425,6 +425,9 @@ body.monitor {
   background: #1a212b;
   color: var(--text);
 }
+.grid-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.grid-tools label { color: var(--muted); }
+.grid-tools input { width: 55px; padding: 6px; }
 
 .controls input[type="range"] {
   accent-color: var(--accent);
@@ -495,3 +498,16 @@ body.monitor {
   color: var(--muted);
   font-size: 13px;
 }
+
+/* Bottom bar uses the same 1920 × 1080 geometry in preview and on air. */
+.board.bottom-bar { display: block; width: 1920px; height: 1080px; }
+.bottom-bar .slot, .monitor .bottom-bar .slot.waiting,
+#templateSlot.bottom-template { border: 0; background: transparent; }
+.bottom-bar .center-logo { position: absolute; left: 850px; top: 830px; width: 220px; height: 250px; }
+.center-logo img { width: 100%; height: 100%; object-fit: contain; }
+.monitor .empty-logo { outline: 2px dashed #88929f; }
+.monitor .empty-logo::after { content: "โลโก้กลาง"; margin: auto; color: #88929f; }
+.opacity-controls { display: inline-flex; gap: 10px; flex-wrap: wrap; }
+.opacity-controls input { width: 70px; }
+
+.grid-tools[hidden] { display: none; }

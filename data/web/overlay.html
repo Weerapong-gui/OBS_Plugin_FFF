@@ -26,6 +26,7 @@ function render(state) {
   wrap.hidden = !revealed;
   if (!revealed) return;
 
+  state = modeState(state, state.displayMode);
   renderBoard(board, state, { revealed: true, showVotes: true, justRevealed: justRevealed });
   applyPieceLayouts(wrap, state);
 }
