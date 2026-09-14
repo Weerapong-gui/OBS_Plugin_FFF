@@ -380,6 +380,11 @@ bool FffSession::movePieceLayer(const QString &target, const QString &action, co
 		pieces.append({key, m_pieceLayers.value(key, index + 1), index + 1});
 	}
 
+	if (mode == QLatin1String("bottomBar"))
+		pieces.append({QStringLiteral("cover"),
+			       m_pieceLayers.value(QStringLiteral("cover"), m_presidents.size() + 1),
+			       static_cast<int>(m_presidents.size()) + 1});
+
 	int current = -1;
 	for (int index = 0; index < pieces.size(); ++index) {
 		if (pieces[index].target == target) {
@@ -463,6 +468,35 @@ QString FffSession::assetUrl(const FffPresident &president, const QString &kind)
 	return QStringLiteral("/api/%1/%2?v=%3").arg(kind, president.id, QFileInfo(path).fileName());
 }
 
+QString FffSession::coverPath() const
+{
+	if (m_cover.isEmpty() || QFileInfo(m_cover).fileName() != m_cover)
+		return QString();
+	return QDir(cardsDir()).filePath(m_cover);
+}
+
+QString FffSession::coverUrl() const
+{
+	const QString path = coverPath();
+	return path.isEmpty() || !QFileInfo::exists(path) ? QString() : QStringLiteral("/api/cover?v=%1").arg(m_cover);
+}
+
+bool FffSession::setCover(const QString &fileName)
+{
+	if (!fileName.isEmpty() &&
+	    (QFileInfo(fileName).fileName() != fileName || !QFileInfo::exists(QDir(cardsDir()).filePath(fileName))))
+		return false;
+	const auto previous = m_cover;
+	m_cover = fileName;
+	if (!save()) {
+		m_cover = previous;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
 QString FffSession::cardPath(const FffPresident &president) const
 {
 	return assetPath(president, QStringLiteral("card"));
@@ -478,7 +512,8 @@ QString FffSession::importCard(const QString &path, const QString &id)
 
 QString FffSession::importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind)
 {
-	if (kind != QLatin1String("card") && kind != QLatin1String("bottomBar") && kind != QLatin1String("logo"))
+	if (kind != QLatin1String("card") && kind != QLatin1String("bottomBar") && kind != QLatin1String("logo") &&
+	    kind != QLatin1String("cover"))
 		return QString();
 	QFile source(sourcePath);
 	if (!source.open(QIODevice::ReadOnly))
@@ -576,6 +611,9 @@ void FffSession::load()
 	if (!validMode(m_displayMode))
 		m_displayMode = QStringLiteral("scoreboard");
 	const auto bottom = root.value(QStringLiteral("bottomBar")).toObject();
+	m_cover = bottom.value(QStringLiteral("cover")).toString();
+	if (QFileInfo(m_cover).fileName() != m_cover)
+		m_cover.clear();
 	m_logoPresidentId = bottom.value(QStringLiteral("logoPresidentId")).toString();
 	if (indexOf(m_logoPresidentId) < 0)
 		m_logoPresidentId.clear();
@@ -596,7 +634,7 @@ void FffSession::load()
 		m_pieceLayouts.clear();
 		const QJsonObject pieces = modeRoot.value(QStringLiteral("pieces")).toObject();
 		for (auto it = pieces.begin(); it != pieces.end(); ++it) {
-			if (it.key() != special &&
+			if (it.key() != special && !(isBottom && it.key() == QLatin1String("cover")) &&
 			    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
 				continue;
 			const QJsonObject value = it.value().toObject();
@@ -626,7 +664,7 @@ void FffSession::load()
 		for (auto it = layers.begin(); it != layers.end(); ++it) {
 			if (!it.value().isDouble())
 				continue;
-			if (it.key() != special &&
+			if (it.key() != special && !(isBottom && it.key() == QLatin1String("cover")) &&
 			    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
 				continue;
 			m_pieceLayers.insert(it.key(), qBound(-10000, it.value().toInt(), 10000));
@@ -801,6 +839,8 @@ QJsonObject FffSession::bottomBarJson() const
 {
 	QJsonObject root;
 	root.insert(QStringLiteral("logoPresidentId"), m_logoPresidentId);
+	root.insert(QStringLiteral("cover"), m_cover);
+	root.insert(QStringLiteral("coverUrl"), coverUrl());
 	QJsonObject layout;
 	if (!m_bottomTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_bottomTemplate);

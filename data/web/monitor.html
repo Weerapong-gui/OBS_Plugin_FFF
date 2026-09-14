@@ -177,9 +177,9 @@ function apply() {
   templateEditor.update(lastState, selected);
   if (!piece) { symmetry.textContent = ""; scaleXValue.textContent = ""; scaleYValue.textContent = ""; return; }
   const layout = piece.layout;
-  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", (selected === "logo" ? 1 : lastState.cardTemplate?.image?.opacity) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
+  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", (!selected.startsWith("card:") ? 1 : lastState.cardTemplate?.image?.opacity) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
     document.getElementById(id).value = Math.round((layout[key] ?? fallback) * 100);
-  document.getElementById("resultOpacity").disabled = selected === "logo";
+  document.getElementById("resultOpacity").disabled = !selected.startsWith("card:");
   const isCard = selected.startsWith("card:");
   const scaleX = isCard ? layout.resultScaleX : layout.scaleX;
   const scaleY = isCard ? layout.resultScaleY : layout.scaleY;
@@ -293,7 +293,15 @@ selection.onchange = () => select(selection.value);
 
 canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || dragging) return;
-  const piece = event.target.closest(".piece");
+  // The full-canvas cover is selected from the list. Even when selected,
+  // hit-test the cards underneath first so it cannot trap the operator.
+  let piece = event.target.closest(".piece");
+  if (piece?.dataset.target === "cover") {
+    const cover = piece;
+    cover.style.pointerEvents = "none";
+    piece = document.elementFromPoint(event.clientX, event.clientY)?.closest(".piece") || cover;
+    cover.style.pointerEvents = "";
+  }
   if (!piece) return;
   select(piece.dataset.target);
   canvas.focus({ preventScroll: true });
@@ -489,7 +497,7 @@ function render(incoming) {
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
 
   const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " — " + p.school]);
-  if (editMode === "bottomBar") choices.push(["logo", "โลโก้กลาง"]);
+  if (editMode === "bottomBar") choices.push(["logo", "โลโก้กลาง"], ["cover", "Cover PNG"]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
     selection.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));

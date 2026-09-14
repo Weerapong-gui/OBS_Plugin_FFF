@@ -301,6 +301,10 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			startSse(socket, token, false);
 			return;
 		}
+		if (path == QLatin1String("/api/cover")) {
+			sendCard(socket, QString(), QStringLiteral("cover"));
+			return;
+		}
 		for (const QString &kind : {QStringLiteral("bottomBar"), QStringLiteral("logo")}) {
 			const QString prefix = QStringLiteral("/api/") + kind + QStringLiteral("/");
 			if (path.startsWith(prefix)) {
@@ -469,7 +473,7 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
-		if (target != special &&
+		if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
 		    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
 			sendJson(socket, 404, "{\"error\":\"unknown layout target\"}");
 			return;
@@ -539,7 +543,7 @@ void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
 	const QString special = mode == QLatin1String("bottomBar") ? QStringLiteral("logo") : QStringLiteral("heading");
 	const QString target = request.value(QStringLiteral("target")).toString();
 	const QString action = request.value(QStringLiteral("action")).toString();
-	if (target != special &&
+	if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
 	    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
 		sendJson(socket, 404, "{\"error\":\"unknown layer target\"}");
 		return;
@@ -656,7 +660,9 @@ void FffHttpServer::sendWebFile(QTcpSocket *socket, const QString &name, const Q
 void FffHttpServer::sendCard(QTcpSocket *socket, const QString &presidentId, const QString &kind)
 {
 	const FffPresident *president = m_session->presidentById(presidentId);
-	const QString path = president ? m_session->assetPath(*president, kind) : QString();
+	const QString path = kind == QLatin1String("cover")
+				     ? m_session->coverPath()
+				     : (president ? m_session->assetPath(*president, kind) : QString());
 	QFile file(path);
 	if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
 		send(socket, 404, "text/plain; charset=utf-8", "no asset");

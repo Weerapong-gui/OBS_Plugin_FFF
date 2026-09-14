@@ -50,7 +50,12 @@
     const seen = new Set();
     state.presidents.forEach((president, index) => {
       let slot = root._slots.get(president.id);
-      if (!slot) { slot = buildSlot(); root._slots.set(president.id, slot); }
+      if (!slot) {
+        slot = buildSlot();
+        const motion = document.createElement("div"); motion.className = "bottom-motion";
+        motion.appendChild(slot.root); slot.piece.appendChild(motion);
+        root._slots.set(president.id, slot);
+      }
       seen.add(president.id);
       slot.piece.dataset.target = "card:" + president.id;
       const left = index < leftCount, count = left ? leftCount : rightCount;
@@ -68,7 +73,7 @@
     if (!root._logo) {
       root._logo = document.createElement("div"); root._logo.className = "piece center-logo";
       root._logo.dataset.target = "logo";
-      root._logo.innerHTML = '<img class="card-image" alt="" />';
+      root._logo.innerHTML = '<div class="bottom-motion"><img class="card-image" alt="" /></div>';
     }
     const logo = root._logo.querySelector("img");
     const url = state.presidents.find(p => p.id === state.logoPresidentId)?.logoUrl;
@@ -76,6 +81,17 @@
     logo.hidden = !url;
     root._logo.classList.toggle("empty-logo", !url);
     root.appendChild(root._logo);
+    if (!root._cover) {
+      root._cover = document.createElement("div"); root._cover.className = "piece bottom-cover";
+      root._cover.dataset.target = "cover";
+      root._cover.innerHTML = '<div class="bottom-motion"><img class="card-image" alt="" /></div>';
+    }
+    const cover = root._cover.querySelector("img");
+    if (state.coverUrl) {
+      if (cover.getAttribute("src") !== state.coverUrl) cover.src = state.coverUrl;
+    } else cover.removeAttribute("src");
+    cover.hidden = !state.coverUrl;
+    root.appendChild(root._cover);
   }
 
   // Slots are reused across updates: rebuilding the grid on every vote would
@@ -86,7 +102,7 @@
     root.classList.toggle("bottom-bar", bottom);
     root.parentElement.classList.toggle("bottom-bar-wrap", bottom);
     if (root._mode !== state.mode) {
-      root.replaceChildren(); root._slots.clear(); root._logo = null; root._mode = state.mode;
+      root.replaceChildren(); root._slots.clear(); root._logo = null; root._cover = null; root._mode = state.mode;
     }
     if (bottom) { renderBottomBar(root, state, opts); return; }
     const slots = root._slots;
@@ -186,10 +202,13 @@
       }
       if (result && !state.cardTemplate) result.style.transform = `scale(${resultScaleX}, ${resultScaleY})`;
       const image = piece.querySelector(".card-image");
-      if (image) image.style.opacity = String(layout.imageOpacity ?? (key === "logo" ? 1 : state.cardTemplate?.image?.opacity) ?? 1);
+      if (image) image.style.opacity = String(layout.imageOpacity ?? (!key.startsWith("card:") ? 1 : state.cardTemplate?.image?.opacity) ?? 1);
       if (result) result.style.opacity = String(layout.resultOpacity ?? state.cardTemplate?.result?.opacity ?? 1);
       const layer = state.layers && state.layers[key];
-      piece.style.zIndex = Number.isInteger(layer) ? String(layer) : "";
+      // Match native layer ordering before the first explicit layer edit.
+      const defaultLayer = key === "cover" ? state.presidents.length + 1 :
+        key === "logo" ? 0 : state.presidents.findIndex(p => "card:" + p.id === key) + 1;
+      piece.style.zIndex = Number.isInteger(layer) ? String(layer) : (state.mode === "bottomBar" ? String(defaultLayer) : "");
       layouts.set(key, { element: piece, layout: { ...layout, scaleX: scaleX, scaleY: scaleY,
         resultScaleX: resultScaleX, resultScaleY: resultScaleY } });
     }

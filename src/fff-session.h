@@ -100,6 +100,10 @@ public:
 	QString importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind);
 	QString assetPath(const FffPresident &president, const QString &kind) const;
 	QString assetUrl(const FffPresident &president, const QString &kind) const;
+	QString coverPath() const;
+	QString coverUrl() const;
+	QString cover() const { return m_cover; }
+	bool setCover(const QString &fileName);
 	QString cardsDir() const;
 	QString cardPath(const FffPresident &president) const;
 	QString cardUrl(const FffPresident &president) const;
@@ -130,6 +134,7 @@ private:
 	QJsonObject m_bottomTemplate;
 	QString m_displayMode = QStringLiteral("scoreboard");
 	QString m_logoPresidentId;
+	QString m_cover;
 
 	QVector<FffPresident> m_presidents;
 	QHash<QString, FffVote> m_votes;

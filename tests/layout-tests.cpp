@@ -89,6 +89,21 @@ int main(int argc, char **argv)
 		reply->deleteLater();
 		return code;
 	};
+	auto getCover = [&]() {
+		auto *reply = network.get(
+			QNetworkRequest(QUrl(QStringLiteral("http://127.0.0.1:%1/api/cover").arg(server.boundPort()))));
+		QEventLoop loop;
+		QTimer timer;
+		timer.setSingleShot(true);
+		QObject::connect(&timer, &QTimer::timeout, reply, &QNetworkReply::abort);
+		QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+		timer.start(3000);
+		loop.exec();
+		const auto result =
+			qMakePair(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt(), reply->readAll());
+		reply->deleteLater();
+		return result;
+	};
 	auto postLayer = [&](const QByteArray &body) {
 		QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/api/layer").arg(server.boundPort())));
 		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -171,6 +186,12 @@ int main(int argc, char **argv)
 	check(post(R"({"mode":"scoreboard"})", QStringLiteral("display")) == 200, "show scoreboard");
 	check(post(R"({"mode":"invalid"})", QStringLiteral("display")) == 400, "invalid display rejected");
 	check(post(R"({"mode":"bottomBar","target":"heading","reset":true})") == 404, "bottom bar rejects heading");
+	check(post(R"({"target":"cover","reset":true})") == 404, "scoreboard rejects cover");
+	check(post(R"({"mode":"bottomBar","target":"cover","layout":{"x":0.5,"y":0.5,"scale":1,"imageOpacity":0.5}})") ==
+		      200,
+	      "cover layout saves");
+	check(post(R"({"mode":"bottomBar","target":"cover","action":"front"})", QStringLiteral("layer")) == 200,
+	      "cover layer saves");
 	check(post(R"({"mode":"bottomBar","target":"logo","layout":{"x":0.5,"y":0.9,"scale":1,"imageOpacity":0.5}})") ==
 		      200,
 	      "logo opacity saves");
@@ -210,6 +231,75 @@ int main(int argc, char **argv)
 	check(!person.bottomBar.isEmpty() && QFile::exists(firstPath), "staged replacement preserves old asset");
 	check(session.updatePresident(person) && firstUrl != session.assetUrl(person, QStringLiteral("bottomBar")),
 	      "same-second replacement changes URL");
+	const auto scoreboardBeforeCover = state(session).value("pieces");
+	const QString firstCover = session.importAsset(png.fileName(), QString(), QStringLiteral("cover"));
+	check(!firstCover.isEmpty() && session.setCover(firstCover), "import and select cover");
+	check(getCover() == qMakePair(200, QByteArray::fromHex("89504e470d0a1a0a")),
+	      "cover HTTP endpoint serves imported bytes");
+	const QString firstCoverPath = session.coverPath();
+	const QString firstCoverUrl = session.coverUrl();
+	const QString replacementCover = session.importAsset(png.fileName(), QString(), QStringLiteral("cover"));
+	check(!replacementCover.isEmpty() && replacementCover != firstCover && QFile::exists(firstCoverPath),
+	      "staging cover preserves previous file and creates a unique filename");
+	check(session.setCover(replacementCover) && session.coverUrl() != firstCoverUrl,
+	      "cover replacement changes cache URL");
+	check(!session.setCover(QStringLiteral("../source.png")) && !session.setCover(QStringLiteral("missing.png")) &&
+		      session.cover() == replacementCover,
+	      "invalid cover references preserve selection");
+	FffSession coverReopened;
+	coverReopened.load();
+	check(coverReopened.cover() == replacementCover && coverReopened.coverUrl() == session.coverUrl(),
+	      "cover selection survives restart");
+	for (const double opacity : {0.0, 0.5, 1.0}) {
+		QJsonObject layout{{"x", 0.25}, {"y", 0.75}, {"scale", 1.5}, {"imageOpacity", opacity}};
+		check(post(QJsonDocument(QJsonObject{{"mode", "bottomBar"}, {"target", "cover"}, {"layout", layout}})
+				   .toJson()) == 200,
+		      "cover opacity endpoint saves");
+		check(state(session).value("bottomBar")
+				      .toObject()
+				      .value("pieces")
+				      .toObject()
+				      .value("cover")
+				      .toObject()
+				      .value("imageOpacity")
+				      .toDouble(-1) == opacity,
+		      "cover opacity is retained exactly");
+	}
+	check(post(R"({"mode":"bottomBar","target":"cover","action":"back"})", QStringLiteral("layer")) == 200,
+	      "cover can move behind all bottom pieces");
+	const auto coverLayers = state(session).value("bottomBar").toObject().value("layers").toObject();
+	check(coverLayers.value("cover").toInt() < coverLayers.value("logo").toInt() &&
+		      coverLayers.value("cover").toInt() < coverLayers.value("card:one").toInt(),
+	      "cover layer participates in bottom ordering");
+	const auto templateBeforeCoverReset = state(session).value("bottomBar").toObject().value("cardTemplate");
+	check(post(R"({"mode":"bottomBar","target":"cover","reset":true})") == 200, "reset cover layout");
+	check(!state(session).value("bottomBar").toObject().value("pieces").toObject().contains("cover") &&
+		      session.cover() == replacementCover &&
+		      state(session).value("bottomBar").toObject().value("cardTemplate") == templateBeforeCoverReset &&
+		      state(session).value("pieces") == scoreboardBeforeCover,
+	      "cover reset preserves asset, template and scoreboard");
+	// Keep the asset directory accessible while forcing the session commit to fail.
+	const QString sessionFile = temp.filePath(QStringLiteral("session.json"));
+	const QString savedSessionFile = temp.filePath(QStringLiteral("session.saved"));
+	check(QFile::rename(sessionFile, savedSessionFile) && QDir().mkdir(sessionFile), "block session save only");
+	int coverFailures = 0;
+	int coverChanges = 0;
+	const auto failedConnection = QObject::connect(&session, &FffSession::saveFailed, [&]() { ++coverFailures; });
+	const auto changedConnection = QObject::connect(&session, &FffSession::changed, [&]() { ++coverChanges; });
+	check(!session.setCover(firstCover) && !session.setCover(QString()), "cover replace and removal fail on save");
+	check(session.cover() == replacementCover && QFile::exists(firstCoverPath) &&
+		      QFile::exists(session.coverPath()) && coverFailures == 2 && coverChanges == 0,
+	      "failed cover writes roll back selection, retain files and emit only failure");
+	QObject::disconnect(failedConnection);
+	QObject::disconnect(changedConnection);
+	check(QDir().rmdir(sessionFile) && QFile::rename(savedSessionFile, sessionFile), "restore session storage");
+	check(session.setCover(QString()) && session.coverPath().isEmpty() && session.coverUrl().isEmpty(),
+	      "remove cover clears active asset");
+	check(getCover().first == 404, "removed cover HTTP endpoint returns missing");
+	FffSession removedCover;
+	removedCover.load();
+	check(removedCover.cover().isEmpty(), "cover removal survives restart");
+	check(session.setCover(replacementCover), "restore cover for remaining rollback checks");
 	QFile blocked(temp.filePath(QStringLiteral("blocked")));
 	check(blocked.open(QIODevice::WriteOnly), "create blocked config");
 	blocked.close();
@@ -253,7 +343,8 @@ int main(int argc, char **argv)
 	FffSession old;
 	old.load();
 	check(old.displayMode() == QLatin1String("scoreboard") && old.phase() == FffPhase::Revealed &&
-		      old.round() == 5 && state(old).value("bottomBar").toObject().value("pieces").toObject().isEmpty(),
+		      old.round() == 5 && old.cover().isEmpty() && old.coverUrl().isEmpty() &&
+		      state(old).value("bottomBar").toObject().value("pieces").toObject().isEmpty(),
 	      "old session retains launch behavior with empty bottom bar");
 	qInfo("PASS: layout/layer APIs, legacy session, persistence, rounds, validation, resets, failed writes");
 }

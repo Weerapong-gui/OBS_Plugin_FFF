@@ -186,6 +186,19 @@ void FffDock::buildUi()
 	connect(bottomBarAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("bottomBar")); });
 	connect(logoAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("logo")); });
 
+	auto *coverButtons = new QHBoxLayout();
+	auto *coverAsset = new QPushButton(QStringLiteral("เลือก Cover PNG"), rosterBox);
+	auto *removeCover = new QPushButton(QStringLiteral("ลบ Cover"), rosterBox);
+	coverAsset->setToolTip(QStringLiteral("ภาพส่วนกลาง BOTTOM BAR แนะนำ PNG โปร่งใส 1920×1080"));
+	coverButtons->addWidget(coverAsset);
+	coverButtons->addWidget(removeCover);
+	rosterLayout->addLayout(coverButtons);
+	connect(coverAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("cover")); });
+	connect(removeCover, &QPushButton::clicked, this, [this]() {
+		if (!m_session->setCover(QString()))
+			showSaveError();
+	});
+
 	root->addWidget(rosterBox, 1);
 	m_saveError = new QLabel(page);
 	m_saveError->setWordWrap(true);
@@ -499,12 +512,13 @@ void FffDock::removeSelected()
 void FffDock::chooseCard(const QString &kind)
 {
 	const QString id = selectedPresidentId();
-	if (id.isEmpty())
+	if (id.isEmpty() && kind != QLatin1String("cover"))
 		return;
 
-	const QString title = kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
-			      : kind == QLatin1String("logo")    ? QStringLiteral("เลือกโลโก้กลาง PNG")
-								 : QStringLiteral("เลือก SCOREBOARD PNG");
+	const QString title = kind == QLatin1String("cover")       ? QStringLiteral("เลือก Cover PNG — แนะนำ 1920×1080")
+			      : kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
+			      : kind == QLatin1String("logo")      ? QStringLiteral("เลือกโลโก้กลาง PNG")
+								   : QStringLiteral("เลือก SCOREBOARD PNG");
 	const QString file = QFileDialog::getOpenFileName(this, title, QString(), QStringLiteral("การ์ด PNG (*.png)"));
 	if (file.isEmpty())
 		return;
@@ -512,6 +526,12 @@ void FffDock::chooseCard(const QString &kind)
 	const QString stored = m_session->importAsset(file, id, kind);
 	if (stored.isEmpty()) {
 		m_saveError->setText(QStringLiteral("นำเข้า PNG ไม่สำเร็จ — รูปเดิมยังอยู่"));
+		return;
+	}
+
+	if (kind == QLatin1String("cover")) {
+		if (!m_session->setCover(stored))
+			showSaveError();
 		return;
 	}
 
