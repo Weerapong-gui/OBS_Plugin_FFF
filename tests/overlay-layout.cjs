@@ -467,7 +467,7 @@ async function main() {
     assert.equal(await monitor.$eval("#selection", (el) => el.value), "");
 
     // Both views share bottom-bar geometry; selecting an edit mode never changes on-air mode.
-    for (const count of [0, 1, 14, 5]) {
+    for (const count of [0, 1, 14, 40, 5]) {
       state = fixture(count); state.phase = "revealed";
       state.bottomBar = { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {}, logoPresidentId: "0" };
       state.presidents.forEach(p => { p.bottomBarUrl = CARD_PNG; p.logoUrl = CARD_PNG; p.vote = "green"; });
@@ -475,6 +475,8 @@ async function main() {
       await monitor.select("#editMode", "bottomBar");
       await ready(count + 2);
       await overlay.waitForFunction(n => document.querySelectorAll("#board .piece").length === n && document.querySelector(".bottom-bar"), {}, count + 2);
+      await overlay.waitForFunction(() => !transition, { polling: 20 });
+      for (const page of [overlay, monitor]) assert.equal(await page.evaluate(() => [...document.querySelectorAll(".bottom-motion")].every(el => getComputedStyle(el).clipPath === "none" && getComputedStyle(el).maskImage === "none" && !el.querySelector(".bottom-wipe"))), true, "resting views contain no motion masks");
       for (const target of ["logo", ...state.presidents.map(p => "card:" + p.id)])
         close(await geometry(monitor, target), await geometry(overlay, target), "bottom bar shared geometry");
       if (count) {

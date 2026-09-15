@@ -69,3 +69,24 @@ Extended native/browser checks cover mode isolation, old session defaults,
 0/1/14/odd rosters, logo deletion, live votes, Clear, opacity, image replacement,
 geometry parity, and persistence rollback. Browser screenshots use fixture PNGs;
 actual school artwork and loading the built plugin in OBS remain manual checks.
+
+### Bottom Bar presentation regression
+
+```sh
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/phone-session.cjs
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/overlay-layout.cjs
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/bottom-bar-cover.cjs
+cmake --build --preset macos
+```
+
+The focused cover suite checks the actual Web Animations timings: logo 180ms,
+cover 300ms, cards 450ms with an 80ms start and center-out pairs 45ms apart
+(stagger capped at 420ms), and interrupted exits 240ms. It samples animation
+progress directly, exercises roster changes and template overflow during entry,
+and checks that resting Overlay and Monitor retain no temporary wipe or clip.
+The 14-card entrance ends at 800ms; the maximum entrance is 950ms.
+
+Set `FFF_MOTION_SCREENSHOTS=1` for deterministic 1920×1080 fixture captures:
+`/private/tmp/fff-motion-{0,180,350,600,800,rest,monitor}.png`. The test pauses
+Web Animations at the requested times and uses synthetic transparent PNGs;
+it never reads or writes the real OBS session.

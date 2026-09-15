@@ -35,7 +35,33 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, state);
     };
     await push();
-    assert.equal(await overlay.evaluate(() => board.getAnimations({ subtree: true }).length), 4);
+    const entrance = await overlay.evaluate(() => Object.fromEntries([...board.querySelectorAll(".piece")].map(piece => {
+      const motion = piece.querySelector(".bottom-motion");
+      const animation = motion.getAnimations().find(a => a.effect.getKeyframes().some(k => k.opacity !== undefined));
+      return [piece.dataset.target, { timing: animation.effect.getTiming(), frames: animation.effect.getKeyframes() }];
+    })));
+    assert.equal(entrance.logo.timing.duration, 180, "logo enters in 180ms");
+    assert.equal(entrance.cover.timing.duration, 300, "cover fades in 300ms");
+    for (const target of ["card:a", "card:b"]) {
+      assert.equal(entrance[target].timing.duration, 450);
+      assert.equal(entrance[target].timing.delay, 80);
+      assert.equal(entrance[target].timing.easing, "cubic-bezier(0.22, 1, 0.36, 1)");
+      assert.match(entrance[target].frames[0].transform, /18px/);
+      assert.ok(entrance[target].frames.some(frame => frame.clipPath && frame.clipPath !== "none"), "cards reveal through a clip");
+    }
+    assert.match(entrance.logo.frames[0].transform, /12px/);
+    assert.ok(entrance.cover.frames.every(frame => !frame.transform || frame.transform === "none"), "cover never travels");
+    const wipeEdge = await overlay.evaluate(() => {
+      const el = board.querySelector('[data-target="card:a"] .bottom-motion');
+      for (const a of el.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 250; }
+      const wipe = el.querySelector(".bottom-wipe"), result = el.querySelector(".result");
+      const css = getComputedStyle(wipe);
+      return { top: new DOMMatrix(css.transform).m42, clip: parseFloat(getComputedStyle(el).clipPath.slice(6)),
+        height: parseFloat(css.height), color: css.backgroundColor, resultColor: getComputedStyle(result).backgroundColor };
+    });
+    assert.equal(wipeEdge.height, 12);
+    assert.equal(wipeEdge.color, wipeEdge.resultColor);
+    assert.ok(Math.abs(wipeEdge.top - wipeEdge.clip) < 0.05, "12px wipe follows reveal edge without shrinking behind clip");
     const continuous = await overlay.evaluate(s => {
       const before = board.getAnimations({ subtree: true });
       for (const animation of before) { animation.pause(); animation.currentTime = 100; }
@@ -43,12 +69,114 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       s.bottomBar.coverUrl = "";
       render(s);
       const after = board.getAnimations({ subtree: true });
-      const result = before.length === after.length && before.every(a => after.includes(a) && a.currentTime === 100);
+      const result = before.length > 0 && before.every(a => after.includes(a) && a.currentTime === 100);
       for (const animation of before) animation.play();
       return result;
     }, state);
     assert.equal(continuous, true, "vote during entrance preserves animation identity and progress");
     await overlay.waitForFunction(() => board.getAnimations({ subtree: true }).length === 0, { polling: 20 });
+    const resting = async page => assert.equal(await page.evaluate(() => [...board.querySelectorAll(".bottom-motion")].every(el => {
+      const css = getComputedStyle(el);
+      return css.clipPath === "none" && css.maskImage === "none" && !el.querySelector(".bottom-wipe");
+    })), true, "resting and Monitor cards have no temporary clipping or wipe");
+    await resting(overlay); await resting(monitor);
+    // Isolated pages give each roster a genuine fresh reveal, with all effects frozen
+    // in the same JS turn so timing assertions do not depend on scheduler speed.
+    for (const count of [0, 1, 5, 14, 40]) {
+      const page = await browser.newPage();
+      await page.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+      await page.goto(`http://127.0.0.1:${server.address().port}/overlay`);
+      const roster = { ...state, presidents: Array.from({ length: count }, (_, i) => ({
+        id: String(i), name: String(i), vote: i % 2 ? "none" : i % 4 ? "red" : "green", bottomBarUrl: PNG
+      })) };
+      const capture = process.env.FFF_MOTION_SCREENSHOTS && count === 14;
+      if (capture) {
+        await page.setViewport({ width: 1920, height: 1080 });
+        const artwork = await page.evaluate(() => {
+          const c = document.createElement("canvas"); c.width = 850; c.height = 250;
+          const ctx = c.getContext("2d");
+          ctx.fillStyle = "#132634"; ctx.fillRect(0, 35, 850, 180);
+          ctx.strokeStyle = "#8ac9df"; ctx.lineWidth = 5; ctx.strokeRect(12, 47, 826, 156);
+          ctx.fillStyle = "#fff"; ctx.font = "bold 42px sans-serif"; ctx.fillText("FIGHT FOR FLAG", 30, 110);
+          ctx.font = "28px sans-serif"; ctx.fillText("MOTION REVIEW", 30, 160);
+          const card = c.toDataURL(); ctx.clearRect(0, 0, 850, 250);
+          ctx.fillStyle = "#dfac54"; ctx.beginPath(); ctx.arc(425, 125, 115, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#132634"; ctx.font = "bold 58px sans-serif"; ctx.fillText("FFF", 370, 146);
+          return { card, logo: c.toDataURL() };
+        });
+        roster.bottomBar = { ...roster.bottomBar, coverUrl: "", logoPresidentId: "0" };
+        roster.presidents.forEach(p => { p.bottomBarUrl = artwork.card; p.logoUrl = artwork.logo; });
+      }
+      if (capture) await page.evaluate(() => {
+        window.motionFixtureTimeout = window.setTimeout;
+        window.setTimeout = (fn, ms, ...args) => motionFixtureTimeout(fn, Math.max(ms, 60000), ...args);
+      });
+      const entries = await page.evaluate(s => {
+        render(s);
+        for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 0; }
+        return [...board.querySelectorAll('[data-target^="card:"]')].map(el => ({
+          timing: el.querySelector(".bottom-motion").getAnimations()[0].effect.getTiming(),
+          wipeVisible: [...el.querySelectorAll(".bottom-wipe")].some(w => !w.hidden && getComputedStyle(w).display !== "none" && getComputedStyle(w).opacity !== "0")
+        }));
+      }, roster);
+      if (capture) {
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => {}))); });
+        for (const time of [0, 180, 350, 600, 800]) {
+          await page.evaluate(time => { for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = time; } }, time);
+          await page.screenshot({ path: `/private/tmp/fff-motion-${time}.png`, omitBackground: true });
+        }
+        await page.evaluate(() => { window.setTimeout = window.motionFixtureTimeout; });
+      }
+      assert.equal(entries.length, count);
+      for (let i = 0; i < count; i++) {
+        const half = Math.ceil(count / 2), pair = i < half ? half - 1 - i : i - half;
+        assert.equal(entries[i].timing.delay, 80 + Math.min(pair * 45, 420), `roster ${count} card ${i} center-out delay`);
+        assert.equal(entries[i].timing.duration, 450);
+        if (i % 2) assert.equal(entries[i].wipeVisible, false, "waiting card never paints vote wipe");
+      }
+      if (count > 1) {
+        const maintained = await page.evaluate(s => {
+          const survivor = board.querySelector('[data-target="card:0"] .bottom-motion');
+          const before = survivor.getAnimations()[0]; before.currentTime = 130;
+          s.presidents.pop();
+          s.bottomBar.cardTemplate = { image: { x: -120, y: -50, width: 1100, height: 350 }, result: { x: -30, y: -20, width: 950, height: 300 }, order: ["result", "image"] };
+          render(s);
+          const bounds = before.effect.getKeyframes().at(-1).clipPath.match(/-?[\d.]+/g).map(Number);
+          return { continuous: before === survivor.getAnimations()[0] && before.currentTime === 130 && transition !== null, bounds };
+        }, roster);
+        assert.equal(maintained.continuous, true, "roster removal and template overflow edit preserve surviving motion");
+        assert.ok(maintained.bounds[0] <= -49 && maintained.bounds[3] <= -119, "clip union includes negative template overflow");
+        const updates = await page.evaluate(s => {
+          const el = board.querySelector('[data-target="card:0"] .bottom-motion');
+          const a = el.getAnimations()[0]; a.currentTime = 130;
+          const results = [];
+          for (const opacity of [0, 0.5, 1]) {
+            s.bottomBar.pieces = { "card:0": { resultOpacity: opacity } };
+            s.presidents[0].vote = opacity === 0.5 ? "red" : "green";
+            render(s);
+            const wipe = getComputedStyle(el.querySelector(".bottom-wipe")), result = getComputedStyle(el.querySelector(".result"));
+            results.push(wipe.opacity === String(opacity) && wipe.backgroundColor === result.backgroundColor && el.getAnimations()[0] === a && a.currentTime === 130);
+          }
+          s.presidents.push({ id: "added", name: "Added", vote: "red" }); render(s);
+          const added = board.querySelector('[data-target="card:added"] .bottom-motion');
+          return { results, addedRest: added.getAnimations({ subtree: true }).length === 0 && getComputedStyle(added).clipPath === "none" };
+        }, roster);
+        assert.ok(updates.results.every(Boolean), "vote colors and result opacity update wipe without replay");
+        assert.equal(updates.addedRest, true, "card added mid-entrance appears at rest");
+      }
+      await page.evaluate(() => { for (const a of board.getAnimations({ subtree: true })) a.finish(); });
+      await page.waitForFunction(() => !transition, { polling: 20 });
+      await resting(page);
+      if (capture) {
+        await page.evaluate(s => render(s), roster);
+        await page.screenshot({ path: "/private/tmp/fff-motion-rest.png", omitBackground: true });
+        await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, roster);
+        await monitor.screenshot({ path: "/private/tmp/fff-motion-monitor.png" });
+        await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, state);
+      }
+      await page.close();
+    }
     const coverInfo = page => page.evaluate(() => {
       const p = document.querySelector('[data-target="cover"]');
       return { width: p.offsetWidth, height: p.offsetHeight, transform: p.style.transform,
@@ -95,6 +223,31 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await push(); assert.equal(await overlay.$eval('[data-target="cover"] img', el => el.hidden && !el.hasAttribute("src")), true);
     state.bottomBar.coverUrl = PNG; state.bottomBar.layers.cover = -1;
     await push(); assert.equal((await coverInfo(overlay)).z, "-1");
+    await overlay.evaluate(s => {
+      // Begin a new round then explicitly sample a partly revealed card.
+      render({ ...s, phase: "collecting", round: s.round + 1 });
+      for (const a of board.getAnimations({ subtree: true })) a.finish();
+    }, state);
+    await overlay.waitForFunction(() => !transition, { polling: 20 });
+    const exitSample = await overlay.evaluate(s => {
+      render(s);
+      for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 160; }
+      const motion = board.querySelector('[data-target="card:a"] .bottom-motion');
+      const before = getComputedStyle(motion);
+      const sampled = { opacity: before.opacity, transform: before.transform, clipPath: before.clipPath };
+      render({ ...s, phase: "collecting", round: s.round + 1 });
+      const a = motion.getAnimations().find(a => a.effect.getKeyframes().some(k => k.opacity !== undefined));
+      const frames = a.effect.getKeyframes();
+      const decoration = ["logo", "cover"].map(target => board.querySelector(`[data-target="${target}"] .bottom-motion`).getAnimations()[0].effect.getKeyframes());
+      return { sampled, first: frames[0], last: frames.at(-1), timing: a.effect.getTiming(), decoration };
+    }, state);
+    assert.equal(exitSample.timing.duration, 240);
+    assert.ok(Math.abs(Number(exitSample.first.opacity) - Number(exitSample.sampled.opacity)) < 0.001, "exit starts at current opacity");
+    assert.equal(exitSample.first.transform, exitSample.sampled.transform, "exit starts at current transform");
+    assert.equal(exitSample.first.clipPath, exitSample.sampled.clipPath, "exit keeps current reveal extent");
+    assert.ok(exitSample.decoration.every(frames => frames[0].transform === frames.at(-1).transform), "logo and cover exit by fading only");
+    await overlay.waitForFunction(() => !transition, { polling: 20 });
+    await push(); await overlay.waitForFunction(() => !transition, { polling: 20 });
     state.phase = "collecting"; state.round++; state.presidents[0].vote = "none";
     await push();
     assert.equal(await overlay.$eval('[data-target="card:a"] .slot', el => el.classList.contains("green")), true, "clear freezes old flag");
@@ -126,7 +279,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       window.savedTimeouts = [];
       const original = window.setTimeout;
       window.setTimeout = (callback, delay, ...args) => {
-        if (delay === 200 || delay === 300) savedTimeouts.push({ callback, delay });
+        savedTimeouts.push({ callback, delay });
         return original(callback, delay, ...args);
       };
       render({ ...s, phase: "collecting", round: s.round + 1 });
@@ -136,7 +289,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await overlay.waitForFunction(() => transition?.entering, { polling: 10 });
     const staleIgnored = await overlay.evaluate(() => {
       const active = transition;
-      savedTimeouts.find(t => t.delay === 200).callback();
+      savedTimeouts[0].callback();
       return transition === active && !wrap.hidden;
     });
     assert.equal(staleIgnored, true, "old exit callback cannot hide next entrance");

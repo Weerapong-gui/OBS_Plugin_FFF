@@ -22,35 +22,112 @@ let displayedRound = null;
 let transition = null;
 let motionGeneration = 0;
 
+const BOTTOM_TIMING = Object.freeze({
+  logo: 180, cover: 300, card: 450, firstPair: 80, pair: 45,
+  maxStagger: 420, exit: 240, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+});
+
+// Measure in the presentation's local coordinates, including template overflow
+// and independently scaled results. Saved transforms stay on the outer piece.
+function revealBounds(element) {
+  const origin = element.getBoundingClientRect();
+  const scaleX = origin.width / element.offsetWidth || 1;
+  const scaleY = origin.height / element.offsetHeight || 1;
+  const bounds = { left: 0, top: 0, right: element.offsetWidth, bottom: element.offsetHeight };
+  for (const child of element.querySelectorAll(".card-image, .result")) {
+    if (child.hidden || getComputedStyle(child).display === "none") continue;
+    const box = child.getBoundingClientRect();
+    bounds.left = Math.min(bounds.left, (box.left - origin.left) / scaleX);
+    bounds.top = Math.min(bounds.top, (box.top - origin.top) / scaleY);
+    bounds.right = Math.max(bounds.right, (box.right - origin.left) / scaleX);
+    bounds.bottom = Math.max(bounds.bottom, (box.bottom - origin.top) / scaleY);
+  }
+  return bounds;
+}
+
 function animateBottom(entering, done = () => {}) {
   const elements = [...board.querySelectorAll(".bottom-motion")];
+  // Read before cancelling: an exit can interrupt any point of the entrance.
   const current = elements.map(element => {
-    const style = getComputedStyle(element);
-    return { opacity: style.opacity, transform: style.transform };
+    const style = getComputedStyle(element), wipe = element.querySelector(".bottom-wipe");
+    const frozenWipe = wipe?.cloneNode();
+    if (frozenWipe) frozenWipe.style.transform = getComputedStyle(wipe).transform;
+    return { opacity: style.opacity, transform: style.transform, clipPath: style.clipPath, frozenWipe };
   });
   if (transition) {
     clearTimeout(transition.timer);
-    for (const animation of transition.motions) animation.cancel();
+    for (const cleanup of transition.cleanups) cleanup();
   }
-  const active = { generation: ++motionGeneration, entering, motions: [], timer: null };
+  const active = { generation: ++motionGeneration, entering, motions: [], cleanups: [], timer: null };
   transition = active;
   const finish = () => {
     if (transition !== active || active.generation !== motionGeneration) return;
     clearTimeout(active.timer);
     transition = null;
-    for (const animation of active.motions) animation.cancel();
+    for (const cleanup of active.cleanups) cleanup();
     done();
   };
-  active.motions = elements.map((element, index) => {
-    const hidden = { opacity: 0, transform: element.closest(".bottom-cover") ? "none" : "translateY(270px)" };
-    const shown = { opacity: 1, transform: "none" };
-    return element.animate([entering ? hidden : current[index], entering ? shown : hidden],
-      { duration: entering ? 300 : 200, easing: entering ? "cubic-bezier(0.16, 1, 0.3, 1)" : "ease-in", fill: "both" });
-  });
-  Promise.all(active.motions.map(animation => animation.finished)).then(finish).catch(() => {});
-  // Background tabs may delay animation promises; the same guarded completion
-  // owns the deadline and is cancelled when another transition replaces it.
-  active.timer = setTimeout(finish, entering ? 300 : 200);
+  let deadline = 0;
+  for (const [index, element] of elements.entries()) {
+    const piece = element.closest(".piece"), card = piece.dataset.target.startsWith("card:");
+    const cover = piece.dataset.target === "cover";
+    const duration = entering ? (card ? BOTTOM_TIMING.card : cover ? BOTTOM_TIMING.cover : BOTTOM_TIMING.logo) : BOTTOM_TIMING.exit;
+    const delay = entering && card ? BOTTOM_TIMING.firstPair + Math.min(BOTTOM_TIMING.maxStagger,
+      Number(piece.dataset.revealPair) * BOTTOM_TIMING.pair) : 0;
+    deadline = Math.max(deadline, duration + delay);
+    const options = { duration, delay, easing: entering ? BOTTOM_TIMING.easing : "ease-in", fill: "both" };
+    const motions = [];
+    let wipe, cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const animation of motions) animation.cancel();
+      wipe?.remove();
+      element._refreshReveal = null;
+      element._cancelPresentation = null;
+    };
+    element._cancelPresentation = cleanup;
+    active.cleanups.push(cleanup);
+    if (entering && card) {
+      wipe = document.createElement("div"); wipe.className = "bottom-wipe";
+      wipe.setAttribute("aria-hidden", "true"); element.appendChild(wipe);
+      const motion = element.animate([], options), sweep = wipe.animate([], options);
+      motions.push(motion, sweep);
+      element._refreshReveal = () => {
+        const box = revealBounds(element);
+        const inset = top => `inset(${top}px ${element.offsetWidth - box.right}px ${element.offsetHeight - box.bottom}px ${box.left}px)`;
+        motion.effect.setKeyframes([
+          { opacity: 0, transform: "translateY(18px)", clipPath: inset(box.bottom) },
+          { opacity: 1, transform: "translateY(0px)", clipPath: inset(box.top) }
+        ]);
+        const result = element.querySelector(".result"), style = getComputedStyle(result);
+        wipe.hidden = style.display === "none";
+        Object.assign(wipe.style, { left: box.left + "px", width: (box.right - box.left) + "px",
+          backgroundColor: style.backgroundColor, opacity: style.opacity });
+        sweep.effect.setKeyframes([
+          { transform: `translateY(${box.bottom}px)` },
+          { transform: `translateY(${box.top}px)` }
+        ]);
+      };
+      element._refreshReveal();
+    } else {
+      const start = entering ? { opacity: 0, transform: cover ? "none" : "translateY(12px)" } :
+        { opacity: current[index].opacity, transform: current[index].transform, clipPath: current[index].clipPath };
+      const end = entering ? { opacity: 1, transform: "none" } :
+        { opacity: 0, transform: card ? new DOMMatrix(current[index].transform).translate(0, 12).toString() : current[index].transform,
+          clipPath: current[index].clipPath };
+      if (!entering && current[index].frozenWipe) {
+        wipe = current[index].frozenWipe; element.appendChild(wipe);
+      }
+      motions.push(element.animate([start, end], options));
+    }
+    active.motions.push(...motions);
+    // Each piece owns its cleanup. Removing one card cannot settle the others.
+    Promise.all(motions.map(animation => animation.finished.catch(() => {}))).then(cleanup);
+  }
+  Promise.all(active.motions.map(animation => animation.finished.catch(() => {}))).then(finish);
+  // Use the actual delayed end, with the same generation-guarded completion.
+  active.timer = setTimeout(finish, deadline);
 }
 
 function render(state) {

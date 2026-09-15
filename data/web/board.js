@@ -59,6 +59,7 @@
       seen.add(president.id);
       slot.piece.dataset.target = "card:" + president.id;
       const left = index < leftCount, count = left ? leftCount : rightCount;
+      slot.piece.dataset.revealPair = String(left ? leftCount - 1 - index : index - leftCount);
       const width = 850 / count;
       Object.assign(slot.piece.style, { position: "absolute", left: ((left ? 0 : 1070) + (left ? index : index - leftCount) * width) + "px", top: "830px", width: width + "px", height: "250px" });
       Object.assign(slot.root.style, { width: "100%", height: "100%" });
@@ -69,7 +70,10 @@
       slot.root.className = "slot " + (president.vote !== "none" && (opts.revealed || opts.showVotes) ? president.vote : "waiting");
       root.appendChild(slot.piece);
     });
-    for (const [id, slot] of root._slots) if (!seen.has(id)) { slot.piece.remove(); root._slots.delete(id); }
+    for (const [id, slot] of root._slots) if (!seen.has(id)) {
+      slot.piece.querySelector(".bottom-motion")?._cancelPresentation?.();
+      slot.piece.remove(); root._slots.delete(id);
+    }
     if (!root._logo) {
       root._logo = document.createElement("div"); root._logo.className = "piece center-logo";
       root._logo.dataset.target = "logo";
@@ -204,6 +208,7 @@
       const image = piece.querySelector(".card-image");
       if (image) image.style.opacity = String(layout.imageOpacity ?? (!key.startsWith("card:") ? 1 : state.cardTemplate?.image?.opacity) ?? 1);
       if (result) result.style.opacity = String(layout.resultOpacity ?? state.cardTemplate?.result?.opacity ?? 1);
+      piece.querySelector(".bottom-motion")?._refreshReveal?.();
       const layer = state.layers && state.layers[key];
       // Match native layer ordering before the first explicit layer edit.
       const defaultLayer = key === "cover" ? state.presidents.length + 1 :
