@@ -12,6 +12,8 @@ GPL-2.0-or-later
 #include <plugin-support.h>
 
 #include <QClipboard>
+#include <QComboBox>
+#include <QSignalBlocker>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QGuiApplication>
@@ -30,7 +32,7 @@ GPL-2.0-or-later
 
 namespace {
 
-enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3 };
+enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3, ColBottomBar = 4, ColLogo = 5 };
 
 constexpr int kVisibleRows = 6;
 
@@ -39,7 +41,7 @@ constexpr int kVisibleRows = 6;
 /*
  * Operator console: set the presidents up before the event, then drive the
  * rounds from the buttons at the bottom. Nothing reaches the stream until
- * "แสดงผลขึ้นจอ" is pressed.
+ * a display mode button is pressed.
  */
 class FffDock : public QWidget {
 public:
@@ -56,7 +58,8 @@ private:
 	void toggleServer();
 	void addPresident();
 	void removeSelected();
-	void chooseCard();
+	void chooseCard(const QString &kind);
+	void showSaveError();
 	void regeneratePin();
 
 	FffSession *m_session = nullptr;
@@ -73,6 +76,10 @@ private:
 	QLabel *m_layoutLabel = nullptr;
 	QListWidget *m_live = nullptr;
 	QPushButton *m_revealButton = nullptr;
+	QPushButton *m_bottomBarButton = nullptr;
+	QComboBox *m_logoPresident = nullptr;
+	QComboBox *m_resetMode = nullptr;
+	QLabel *m_saveError = nullptr;
 
 	bool m_updating = false;
 };
@@ -85,7 +92,10 @@ FffDock::FffDock()
 
 	buildUi();
 
-	connect(m_session, &FffSession::changed, this, [this]() { refreshLive(); });
+	connect(m_session, &FffSession::changed, this, [this]() {
+		m_saveError->clear();
+		refreshLive();
+	});
 	connect(m_server, &FffHttpServer::clientsChanged, this, [this]() {
 		refreshServer();
 		refreshLive();
@@ -143,9 +153,10 @@ void FffDock::buildUi()
 	auto *rosterBox = new QGroupBox(QStringLiteral("รายชื่อนายก"), page);
 	auto *rosterLayout = new QVBoxLayout(rosterBox);
 
-	m_table = new QTableWidget(0, 4, rosterBox);
+	m_table = new QTableWidget(0, 6, rosterBox);
 	m_table->setHorizontalHeaderLabels({QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"),
-					    QStringLiteral("การ์ด PNG")});
+					    QStringLiteral("SCOREBOARD PNG"), QStringLiteral("BOTTOM BAR PNG"),
+					    QStringLiteral("โลโก้ PNG")});
 	m_table->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
 	m_table->horizontalHeader()->setSectionResizeMode(ColSchool, QHeaderView::Stretch);
 	m_table->verticalHeader()->setVisible(false);
@@ -166,7 +177,33 @@ void FffDock::buildUi()
 	rosterButtons->addWidget(pinButton);
 	rosterLayout->addLayout(rosterButtons);
 
+	auto *assetButtons = new QHBoxLayout();
+	auto *bottomBarAsset = new QPushButton(QStringLiteral("เลือก BOTTOM BAR PNG"), rosterBox);
+	auto *logoAsset = new QPushButton(QStringLiteral("เลือกโลโก้กลาง PNG"), rosterBox);
+	assetButtons->addWidget(bottomBarAsset);
+	assetButtons->addWidget(logoAsset);
+	rosterLayout->addLayout(assetButtons);
+	connect(bottomBarAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("bottomBar")); });
+	connect(logoAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("logo")); });
+
+	auto *coverButtons = new QHBoxLayout();
+	auto *coverAsset = new QPushButton(QStringLiteral("เลือก Cover PNG"), rosterBox);
+	auto *removeCover = new QPushButton(QStringLiteral("ลบ Cover"), rosterBox);
+	coverAsset->setToolTip(QStringLiteral("ภาพส่วนกลาง BOTTOM BAR แนะนำ PNG โปร่งใส 1920×1080"));
+	coverButtons->addWidget(coverAsset);
+	coverButtons->addWidget(removeCover);
+	rosterLayout->addLayout(coverButtons);
+	connect(coverAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("cover")); });
+	connect(removeCover, &QPushButton::clicked, this, [this]() {
+		if (!m_session->setCover(QString()))
+			showSaveError();
+	});
+
 	root->addWidget(rosterBox, 1);
+	m_saveError = new QLabel(page);
+	m_saveError->setWordWrap(true);
+	m_saveError->setStyleSheet(QStringLiteral("color:#ff8075;"));
+	root->addWidget(m_saveError);
 
 	auto *liveBox = new QGroupBox(QStringLiteral("รอบปัจจุบัน"), page);
 	auto *liveLayout = new QVBoxLayout(liveBox);
@@ -178,9 +215,29 @@ void FffDock::buildUi()
 	m_live = new QListWidget(liveBox);
 	liveLayout->addWidget(m_live);
 
-	m_revealButton = new QPushButton(QStringLiteral("แสดงผลขึ้นจอ"), liveBox);
+	m_revealButton = new QPushButton(QStringLiteral("SCOREBOARD"), liveBox);
 	m_revealButton->setMinimumHeight(38);
 	liveLayout->addWidget(m_revealButton);
+	m_revealButton->setCheckable(true);
+	m_bottomBarButton = new QPushButton(QStringLiteral("BOTTOM BAR"), liveBox);
+	m_bottomBarButton->setMinimumHeight(38);
+	m_bottomBarButton->setCheckable(true);
+	liveLayout->addWidget(m_bottomBarButton);
+	auto *resultButton = new QPushButton(QStringLiteral("RESUIT — เร็ว ๆ นี้"), liveBox);
+	resultButton->setEnabled(false);
+	resultButton->setToolTip(QStringLiteral("เร็ว ๆ นี้"));
+	liveLayout->addWidget(resultButton);
+	auto *logoRow = new QHBoxLayout();
+	logoRow->addWidget(new QLabel(QStringLiteral("สำนักสำหรับโลโก้กลาง"), liveBox));
+	m_logoPresident = new QComboBox(liveBox);
+	logoRow->addWidget(m_logoPresident, 1);
+	liveLayout->addLayout(logoRow);
+	connect(m_logoPresident, &QComboBox::currentIndexChanged, this, [this](int) {
+		if (!m_session->setLogoPresident(m_logoPresident->currentData().toString())) {
+			showSaveError();
+			refreshLive();
+		}
+	});
 
 	auto *clearButton = new QPushButton(QStringLiteral("Clear — เริ่มรอบใหม่"), liveBox);
 	clearButton->setMinimumHeight(44);
@@ -190,7 +247,11 @@ void FffDock::buildUi()
 	m_layoutLabel = new QLabel(liveBox);
 	m_layoutLabel->setWordWrap(true);
 	layoutRow->addWidget(m_layoutLabel, 1);
-	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่งทั้งหมด"), liveBox);
+	m_resetMode = new QComboBox(liveBox);
+	m_resetMode->addItem(QStringLiteral("SCOREBOARD"), QStringLiteral("scoreboard"));
+	m_resetMode->addItem(QStringLiteral("BOTTOM BAR"), QStringLiteral("bottomBar"));
+	layoutRow->addWidget(m_resetMode);
+	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่งโหมดที่เลือก"), liveBox);
 	layoutRow->addWidget(resetLayoutButton);
 	liveLayout->addLayout(layoutRow);
 
@@ -200,11 +261,26 @@ void FffDock::buildUi()
 	connect(m_serverButton, &QPushButton::clicked, this, [this]() { toggleServer(); });
 	connect(addButton, &QPushButton::clicked, this, [this]() { addPresident(); });
 	connect(removeButton, &QPushButton::clicked, this, [this]() { removeSelected(); });
-	connect(cardButton, &QPushButton::clicked, this, [this]() { chooseCard(); });
+	connect(cardButton, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("card")); });
 	connect(pinButton, &QPushButton::clicked, this, [this]() { regeneratePin(); });
-	connect(m_revealButton, &QPushButton::clicked, this, [this]() { m_session->forceReveal(); });
-	connect(clearButton, &QPushButton::clicked, this, [this]() { m_session->clearRound(); });
-	connect(resetLayoutButton, &QPushButton::clicked, this, [this]() { m_session->resetLayouts(); });
+	connect(m_revealButton, &QPushButton::clicked, this, [this]() {
+		if (!m_session->showMode(QStringLiteral("scoreboard")))
+			showSaveError();
+		refreshLive();
+	});
+	connect(m_bottomBarButton, &QPushButton::clicked, this, [this]() {
+		if (!m_session->showMode(QStringLiteral("bottomBar")))
+			showSaveError();
+		refreshLive();
+	});
+	connect(clearButton, &QPushButton::clicked, this, [this]() {
+		if (!m_session->clearRound())
+			showSaveError();
+	});
+	connect(resetLayoutButton, &QPushButton::clicked, this, [this]() {
+		if (!m_session->resetLayouts(m_resetMode->currentData().toString()))
+			showSaveError();
+	});
 
 	connect(m_table, &QTableWidget::itemChanged, this, [this](QTableWidgetItem *item) {
 		if (m_updating || !item)
@@ -224,7 +300,10 @@ void FffDock::buildUi()
 			updated.name = item->text();
 		else
 			updated.school = item->text();
-		m_session->updatePresident(updated);
+		if (!m_session->updatePresident(updated)) {
+			showSaveError();
+			refreshTable();
+		}
 	});
 }
 
@@ -293,6 +372,7 @@ void FffDock::refreshServer()
 
 void FffDock::refreshTable()
 {
+	const QString selectedId = selectedPresidentId();
 	m_updating = true;
 	m_table->setRowCount(m_session->presidents().size());
 
@@ -311,6 +391,15 @@ void FffDock::refreshTable()
 			new QTableWidgetItem(president.card.isEmpty() ? QStringLiteral("—") : QStringLiteral("มี PNG"));
 		cardItem->setFlags(cardItem->flags() & ~Qt::ItemIsEditable);
 		m_table->setItem(row, ColCard, cardItem);
+		for (const auto &asset :
+		     {qMakePair(ColBottomBar, president.bottomBar), qMakePair(ColLogo, president.logo)}) {
+			auto *item = new QTableWidgetItem(asset.second.isEmpty() ? QStringLiteral("—")
+										 : QStringLiteral("มี PNG"));
+			item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+			m_table->setItem(row, asset.first, item);
+		}
+		if (president.id == selectedId)
+			m_table->selectRow(row);
 		++row;
 	}
 	m_updating = false;
@@ -332,13 +421,25 @@ void FffDock::refreshLive()
 	m_summary->setText(
 		QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4").arg(m_session->round()).arg(voted).arg(total).arg(phase));
 
-	m_revealButton->setEnabled(!revealed && total > 0);
+	m_revealButton->setEnabled(true);
+	m_bottomBarButton->setEnabled(true);
+	m_revealButton->setChecked(revealed && m_session->displayMode() == QLatin1String("scoreboard"));
+	m_bottomBarButton->setChecked(revealed && m_session->displayMode() == QLatin1String("bottomBar"));
+	{
+		const QSignalBlocker blocker(m_logoPresident);
+		m_logoPresident->clear();
+		m_logoPresident->addItem(QStringLiteral("ไม่เลือกโลโก้"), QString());
+		for (const auto &president : m_session->presidents())
+			m_logoPresident->addItem(president.school.isEmpty() ? president.name : president.school,
+						 president.id);
+		m_logoPresident->setCurrentIndex(qMax(0, m_logoPresident->findData(m_session->logoPresidentId())));
+	}
 	// Nothing reaches the stream on its own any more, so make the moment
 	// everyone has answered impossible to miss.
 	m_revealButton->setStyleSheet(
 		ready && !revealed ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;") : QString());
 
-	m_layoutLabel->setText(QStringLiteral("เลือกการ์ดหรือหัวข้อในจอมอนิเตอร์ เพื่อลากและปรับขนาดแยกกัน"));
+	m_layoutLabel->setText(QStringLiteral("เลือกโหมดแก้ไขในจอมอนิเตอร์ เพื่อลากและปรับขนาด โดยไม่สลับภาพออกอากาศ"));
 
 	m_live->clear();
 	for (const FffPresident &president : m_session->presidents()) {
@@ -373,7 +474,11 @@ void FffDock::toggleServer()
 	}
 
 	const quint16 port = static_cast<quint16>(m_port->value());
-	m_session->setPort(port);
+	if (!m_session->setPort(port)) {
+		showSaveError();
+		m_port->setValue(m_session->port());
+		return;
+	}
 
 	QString error;
 	if (!m_server->start(port, &error))
@@ -389,7 +494,8 @@ void FffDock::addPresident()
 	president.name = QStringLiteral("นายกคนใหม่");
 	president.school = QStringLiteral("สำนักวิชา");
 	president.pin = m_session->uniquePin();
-	m_session->addPresident(president);
+	if (!m_session->addPresident(president))
+		showSaveError();
 	refreshTable();
 }
 
@@ -398,32 +504,57 @@ void FffDock::removeSelected()
 	const QString id = selectedPresidentId();
 	if (id.isEmpty())
 		return;
-	m_session->removePresident(id);
+	if (!m_session->removePresident(id))
+		showSaveError();
 	refreshTable();
 }
 
-void FffDock::chooseCard()
+void FffDock::chooseCard(const QString &kind)
 {
 	const QString id = selectedPresidentId();
-	if (id.isEmpty())
+	if (id.isEmpty() && kind != QLatin1String("cover"))
 		return;
 
-	const QString file = QFileDialog::getOpenFileName(this, QStringLiteral("เลือกการ์ด PNG"), QString(),
-							  QStringLiteral("การ์ด PNG (*.png)"));
+	const QString title = kind == QLatin1String("cover")       ? QStringLiteral("เลือก Cover PNG — แนะนำ 1920×1080")
+			      : kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
+			      : kind == QLatin1String("logo")      ? QStringLiteral("เลือกโลโก้กลาง PNG")
+								   : QStringLiteral("เลือก SCOREBOARD PNG");
+	const QString file = QFileDialog::getOpenFileName(this, title, QString(), QStringLiteral("การ์ด PNG (*.png)"));
 	if (file.isEmpty())
 		return;
 
-	const QString stored = m_session->importCard(file, id);
-	if (stored.isEmpty())
+	const QString stored = m_session->importAsset(file, id, kind);
+	if (stored.isEmpty()) {
+		m_saveError->setText(QStringLiteral("นำเข้า PNG ไม่สำเร็จ — รูปเดิมยังอยู่"));
 		return;
+	}
+
+	if (kind == QLatin1String("cover")) {
+		if (!m_session->setCover(stored))
+			showSaveError();
+		return;
+	}
 
 	const FffPresident *existing = m_session->presidentById(id);
 	if (!existing)
 		return;
 	FffPresident updated = *existing;
-	updated.card = stored;
-	m_session->updatePresident(updated);
+	if (kind == QLatin1String("bottomBar"))
+		updated.bottomBar = stored;
+	else if (kind == QLatin1String("logo"))
+		updated.logo = stored;
+	else
+		updated.card = stored;
+	if (!m_session->updatePresident(updated)) {
+		showSaveError();
+		refreshTable();
+	}
 	refreshTable();
+}
+
+void FffDock::showSaveError()
+{
+	m_saveError->setText(QStringLiteral("บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว กรุณาตรวจสอบพื้นที่และสิทธิ์เขียนไฟล์"));
 }
 
 void FffDock::regeneratePin()
@@ -437,7 +568,10 @@ void FffDock::regeneratePin()
 		return;
 	FffPresident updated = *existing;
 	updated.pin = m_session->uniquePin();
-	m_session->updatePresident(updated);
+	if (!m_session->updatePresident(updated)) {
+		showSaveError();
+		refreshTable();
+	}
 	refreshTable();
 }
 

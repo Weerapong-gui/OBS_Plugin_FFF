@@ -16,22 +16,76 @@
 const wrap = document.getElementById("wrap");
 const board = document.getElementById("board");
 let lastPhase = null;
+let lastState = null;
+let displayedMode = null;
+let displayedRound = null;
+let transition = null;
+let motionGeneration = 0;
+
+function animateBottom(entering, done = () => {}) {
+  const elements = [...board.querySelectorAll(".bottom-motion")];
+  const current = elements.map(element => {
+    const style = getComputedStyle(element);
+    return { opacity: style.opacity, transform: style.transform };
+  });
+  if (transition) {
+    clearTimeout(transition.timer);
+    for (const animation of transition.motions) animation.cancel();
+  }
+  const active = { generation: ++motionGeneration, entering, motions: [], timer: null };
+  transition = active;
+  const finish = () => {
+    if (transition !== active || active.generation !== motionGeneration) return;
+    clearTimeout(active.timer);
+    transition = null;
+    for (const animation of active.motions) animation.cancel();
+    done();
+  };
+  active.motions = elements.map((element, index) => {
+    const hidden = { opacity: 0, transform: element.closest(".bottom-cover") ? "none" : "translateY(270px)" };
+    const shown = { opacity: 1, transform: "none" };
+    return element.animate([entering ? hidden : current[index], entering ? shown : hidden],
+      { duration: entering ? 300 : 200, easing: entering ? "cubic-bezier(0.16, 1, 0.3, 1)" : "ease-in", fill: "both" });
+  });
+  Promise.all(active.motions.map(animation => animation.finished)).then(finish).catch(() => {});
+  // Background tabs may delay animation promises; the same guarded completion
+  // owns the deadline and is cancelled when another transition replaces it.
+  active.timer = setTimeout(finish, entering ? 300 : 200);
+}
 
 function render(state) {
+  lastState = state;
   const revealed = state.phase === "revealed";
+  const mode = state.displayMode || "scoreboard";
+  // Freeze the outgoing round. Every incoming command updates lastState, and
+  // the one completion below renders that latest state after the exit.
+  if (transition && !transition.entering) return;
+  if (displayedMode === "bottomBar" && !wrap.hidden &&
+      (!revealed || mode !== "bottomBar" || displayedRound !== state.round)) {
+    animateBottom(false, () => {
+      wrap.hidden = true;
+      displayedMode = null;
+      render(lastState);
+    });
+    return;
+  }
+
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
-
-  // Nothing at all on air until the operator says so.
-  wrap.hidden = !revealed;
-  if (!revealed) return;
-
-  renderBoard(board, state, { revealed: true, showVotes: true, justRevealed: justRevealed });
-  applyPieceLayouts(wrap, state);
+  if (!revealed) {
+    wrap.hidden = true; displayedMode = null;
+    return;
+  }
+  const enteringBottom = mode === "bottomBar" && displayedMode !== "bottomBar";
+  wrap.hidden = false;
+  displayedMode = mode; displayedRound = state.round;
+  const view = modeState(state, mode);
+  renderBoard(board, view, { revealed: true, showVotes: true, justRevealed });
+  applyPieceLayouts(wrap, view);
+  if (enteringBottom) animateBottom(true);
 }
 
 const stream = new EventSource("/api/events/overlay");
-let lastState = null;
 stream.onmessage = (event) => { lastState = JSON.parse(event.data); render(lastState); };
 document.fonts.ready.then(() => { if (lastState) render(lastState); });
 </script>

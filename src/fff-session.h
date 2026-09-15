@@ -23,6 +23,8 @@ struct FffPresident {
 	QString school;
 	QString card;
 	QString pin;
+	QString bottomBar;
+	QString logo;
 };
 
 // Centre and scale on the 1920x1080 canvas, used for both the legacy board
@@ -38,6 +40,9 @@ struct FffLayout {
 	// Cards may resize their red/green result backdrop without scaling the PNG.
 	double resultScaleX = 1.0;
 	double resultScaleY = 1.0;
+	// Negative means inherit the template opacity.
+	double imageOpacity = -1.0;
+	double resultOpacity = -1.0;
 };
 
 /*
@@ -56,9 +61,9 @@ public:
 	const FffPresident *presidentByPin(const QString &pin) const;
 	int indexOf(const QString &id) const;
 
-	void addPresident(const FffPresident &president);
-	void updatePresident(const FffPresident &president);
-	void removePresident(const QString &id);
+	bool addPresident(const FffPresident &president);
+	bool updatePresident(const FffPresident &president);
+	bool removePresident(const QString &id);
 
 	FffPhase phase() const { return m_phase; }
 	int round() const { return m_round; }
@@ -66,22 +71,39 @@ public:
 	int votedCount() const;
 
 	bool setVote(const QString &presidentId, FffVote vote);
-	void forceReveal();
-	void clearRound();
+	bool forceReveal();
+	bool clearRound();
 
 	quint16 port() const { return m_port; }
-	void setPort(quint16 port);
+	bool setPort(quint16 port);
 
-	FffLayout layout() const { return m_layout; }
-	void setLayout(const FffLayout &layout);
+	FffLayout layout(const QString &mode = QStringLiteral("scoreboard")) const
+	{
+		return mode == QLatin1String("bottomBar") ? m_bottomLayout : m_layout;
+	}
+	bool setLayout(const FffLayout &layout, const QString &mode = QStringLiteral("scoreboard"));
 	// "heading" or "card:<id>"; nullptr removes an override to use the grid.
-	bool setPieceLayout(const QString &target, const FffLayout *layout);
-	bool resetLayouts();
+	bool setPieceLayout(const QString &target, const FffLayout *layout,
+			    const QString &mode = QStringLiteral("scoreboard"));
+	bool resetLayouts(const QString &mode = QStringLiteral("scoreboard"));
 	static bool validCardTemplate(const QJsonObject &value);
-	bool setCardTemplate(const QJsonObject &value);
+	bool setCardTemplate(const QJsonObject &value, const QString &mode = QStringLiteral("scoreboard"));
 	// Moves "heading" or "card:<id>" within the persisted stacking order.
-	bool movePieceLayer(const QString &target, const QString &action);
+	bool movePieceLayer(const QString &target, const QString &action,
+			    const QString &mode = QStringLiteral("scoreboard"));
 
+	static bool validMode(const QString &mode);
+	bool showMode(const QString &mode);
+	bool setLogoPresident(const QString &id);
+	QString displayMode() const { return m_displayMode; }
+	QString logoPresidentId() const { return m_logoPresidentId; }
+	QString importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind);
+	QString assetPath(const FffPresident &president, const QString &kind) const;
+	QString assetUrl(const FffPresident &president, const QString &kind) const;
+	QString coverPath() const;
+	QString coverUrl() const;
+	QString cover() const { return m_cover; }
+	bool setCover(const QString &fileName);
 	QString cardsDir() const;
 	QString cardPath(const FffPresident &president) const;
 	QString cardUrl(const FffPresident &president) const;
@@ -101,9 +123,18 @@ public:
 
 signals:
 	void changed();
+	void saveFailed();
 
 private:
 	QString configDir() const;
+	QJsonObject bottomBarJson() const;
+	FffLayout m_bottomLayout;
+	QHash<QString, FffLayout> m_bottomPieces;
+	QHash<QString, int> m_bottomLayers;
+	QJsonObject m_bottomTemplate;
+	QString m_displayMode = QStringLiteral("scoreboard");
+	QString m_logoPresidentId;
+	QString m_cover;
 
 	QVector<FffPresident> m_presidents;
 	QHash<QString, FffVote> m_votes;

@@ -17,6 +17,8 @@ const fixture = (count) => ({
 });
 let state = fixture(6);
 let failSaves = false;
+let layoutDelay = 0;
+let templateDelay = 0;
 const overlayStreams = new Set();
 const phoneStreams = new Map();
 const phoneState = (id) => {
@@ -33,9 +35,11 @@ const push = () => {
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/api/template") {
+    if (templateDelay) await new Promise(resolve => setTimeout(resolve, templateDelay));
     let body = ""; for await (const chunk of req) body += chunk;
     if (failSaves) { res.writeHead(500); res.end(); return; }
-    state.cardTemplate = JSON.parse(body); push();
+    const request = JSON.parse(body);
+    (request.mode === "bottomBar" ? state.bottomBar : state).cardTemplate = request; push();
     res.writeHead(200); res.end('{"ok":true}'); return;
   }
   const url = new URL(req.url, "http://127.0.0.1");
@@ -75,16 +79,18 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.url === "/api/layout") {
+    if (layoutDelay) await new Promise(resolve => setTimeout(resolve, layoutDelay));
     let body = "";
     for await (const chunk of req) body += chunk;
     if (failSaves) { res.writeHead(500); res.end(); return; }
     const request = JSON.parse(body);
+    const targetState = request.mode === "bottomBar" ? state.bottomBar : state;
     if (request.target === "all") {
-      state.layout = { x: 0.5, y: 0.5, scale: 1 };
-      state.pieces = {};
-      state.layers = {};
-    } else if (request.reset) delete state.pieces[request.target];
-    else state.pieces[request.target] = request.layout;
+      targetState.layout = { x: 0.5, y: 0.5, scale: 1 };
+      targetState.pieces = {};
+      targetState.layers = {};
+    } else if (request.reset) delete targetState.pieces[request.target];
+    else targetState.pieces[request.target] = request.layout;
     push();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end('{"ok":true}');
@@ -94,11 +100,12 @@ const server = http.createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body);
-    const targets = ["heading", ...state.presidents.map((item) => "card:" + item.id)];
+    const targetState = request.mode === "bottomBar" ? state.bottomBar : state;
+    const targets = [...(request.mode === "bottomBar" ? ["logo"] : ["heading"]), ...state.presidents.map((item) => "card:" + item.id), ...(request.mode === "bottomBar" ? ["cover"] : [])];
     if (!targets.includes(request.target)) { res.writeHead(404); res.end(); return; }
     const actions = ["front", "forward", "backward", "back"];
     if (!actions.includes(request.action)) { res.writeHead(400); res.end(); return; }
-    const ordered = targets.map((target, index) => ({ target, index, layer: state.layers[target] ?? index }))
+    const ordered = targets.map((target, index) => ({ target, index, layer: targetState.layers[target] ?? index }))
       .sort((a, b) => a.layer - b.layer || a.index - b.index);
     const current = ordered.findIndex((item) => item.target === request.target);
     if (request.action === "front") ordered.push(ordered.splice(current, 1)[0]);
@@ -107,7 +114,7 @@ const server = http.createServer(async (req, res) => {
       [ordered[current], ordered[current + 1]] = [ordered[current + 1], ordered[current]];
     if (request.action === "backward" && current > 0)
       [ordered[current], ordered[current - 1]] = [ordered[current - 1], ordered[current]];
-    state.layers = Object.fromEntries(ordered.map((item, index) => [item.target, index]));
+    targetState.layers = Object.fromEntries(ordered.map((item, index) => [item.target, index]));
     push();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end('{"ok":true}');
@@ -219,11 +226,11 @@ async function main() {
     await monitor.waitForFunction(() => lastState.voted === 1);
     close(await geometry(monitor, "card:0"), duringDrag, "vote does not interrupt drag");
     await monitor.mouse.up();
-    await monitor.waitForFunction(() => document.getElementById("saveStatus").textContent.includes("ยังบันทึกไม่ได้"));
+    await monitor.waitForFunction(() => document.getElementById("saveStatus").textContent.includes("บันทึกไม่สำเร็จ"));
     assert.equal(state.pieces["card:0"], undefined);
     close(await geometry(monitor, "card:1"), beforeOther, "other card unchanged");
     failSaves = false;
-    await monitor.evaluate(() => flush());
+    await monitor.evaluate(() => { startDraft(); draft.layout.x = 0.75; draft.layout.y = 0.8; commitDraft(); });
     await settled();
     assert.ok(Math.abs(state.pieces["card:0"].x - 0.75) < 0.002);
     close(await geometry(monitor, "card:0"), await geometry(overlay, "card:0"), "retry reaches overlay");
@@ -341,6 +348,10 @@ async function main() {
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("บันทึกไม่สำเร็จ"));
     assert.equal(state.cardTemplate, undefined);
     failSaves = false;
+    for (const [id, value] of [["templateX", 35], ["templateY", -20], ["templateWidth", 220], ["templateHeight", 100]]) {
+      await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
+    }
+    await monitor.click("#templateUp");
     await monitor.click("#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
     assert.equal(state.cardTemplate.result.x, 35);
@@ -433,7 +444,7 @@ async function main() {
     state.round++;
     for (const president of state.presidents) president.vote = "none";
     push();
-    await overlay.waitForFunction(() => document.getElementById("wrap").hidden);
+    await overlay.waitForFunction(() => document.getElementById("wrap").hidden, { polling: 50 });
     assert.deepEqual(state.pieces, saved);
     await monitor.reload();
     await ready(6);
@@ -454,6 +465,126 @@ async function main() {
     push();
     await ready(0);
     assert.equal(await monitor.$eval("#selection", (el) => el.value), "");
+
+    // Both views share bottom-bar geometry; selecting an edit mode never changes on-air mode.
+    for (const count of [0, 1, 14, 5]) {
+      state = fixture(count); state.phase = "revealed";
+      state.bottomBar = { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {}, logoPresidentId: "0" };
+      state.presidents.forEach(p => { p.bottomBarUrl = CARD_PNG; p.logoUrl = CARD_PNG; p.vote = "green"; });
+      state.displayMode = "bottomBar"; push();
+      await monitor.select("#editMode", "bottomBar");
+      await ready(count + 2);
+      await overlay.waitForFunction(n => document.querySelectorAll("#board .piece").length === n && document.querySelector(".bottom-bar"), {}, count + 2);
+      for (const target of ["logo", ...state.presidents.map(p => "card:" + p.id)])
+        close(await geometry(monitor, target), await geometry(overlay, target), "bottom bar shared geometry");
+      if (count) {
+        const metrics = await overlay.$eval('[data-target="card:0"]', el => ({ x: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop }));
+        assert.equal(metrics.x, 0); assert.equal(metrics.top, 830);
+        assert.ok(Math.abs(metrics.width - 850 / Math.ceil(count / 2)) < 1);
+      }
+    }
+    await monitor.select("#selection", "card:0");
+    for (const value of [0, 50, 100]) {
+      await monitor.$eval("#imageOpacity", (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
+      await settled();
+      await overlay.waitForFunction(value => document.querySelector('[data-target="card:0"] img').style.opacity === String(value / 100), {}, value);
+      assert.equal(state.bottomBar.pieces["card:0"].imageOpacity, value / 100);
+      assert.deepEqual(state.pieces, {});
+    }
+    // A response arriving after switching editors must update only its original mode.
+    layoutDelay = 150;
+    await monitor.$eval("#resultOpacity", el => { el.value = 50; el.dispatchEvent(new Event("change")); });
+    await monitor.select("#editMode", "scoreboard");
+    await settled(); layoutDelay = 0;
+    assert.equal(state.bottomBar.pieces["card:0"].resultOpacity, 0.5);
+    assert.deepEqual(state.pieces, {});
+    assert.equal(state.displayMode, "bottomBar");
+    assert.equal(await overlay.$eval("#board", el => el.classList.contains("bottom-bar")), true);
+    await monitor.select("#editMode", "bottomBar");
+    // Template opacity is shared until explicitly overridden on a piece.
+    await monitor.select("#selection", "card:1");
+    await monitor.click('[data-layer="image"]');
+    await monitor.$eval("#templateOpacity", el => { el.value = 50; el.dispatchEvent(new Event("change")); });
+    await monitor.click("#templateApply");
+    await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
+    await overlay.waitForFunction(() => document.querySelector('[data-target="card:1"] img').style.opacity === "0.5");
+    assert.equal(await overlay.$eval('[data-target="card:0"] img', el => el.style.opacity), "1");
+    assert.equal(state.cardTemplate, undefined);
+    assert.equal(await overlay.$eval('[data-target="logo"] img', el => el.style.opacity), "1", "card template opacity does not affect logo");
+    // Cover remains independent from card templates and scoreboard placement.
+    state.bottomBar.coverUrl = CARD_PNG; push();
+    await monitor.waitForFunction(() => document.querySelector('[data-target="cover"] img').naturalWidth > 0);
+    await overlay.waitForFunction(() => document.querySelector('[data-target="cover"] img').naturalWidth > 0, { polling: 50 });
+    await monitor.select("#selection", "cover");
+    const coverBefore = await geometry(monitor, "cover");
+    const cardBeforeCover = await geometry(monitor, "card:0");
+    const coverDrag = await monitor.$eval("#canvas", el => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width * 0.2, y: r.y + r.height * 0.2, dx: r.width * 0.08, dy: r.height * 0.06 };
+    });
+    await monitor.mouse.move(coverDrag.x, coverDrag.y);
+    await monitor.mouse.down();
+    assert.equal(await monitor.evaluate(() => dragging && selected === "cover"), true);
+    await monitor.mouse.move(coverDrag.x + coverDrag.dx, coverDrag.y + coverDrag.dy, { steps: 5 });
+    await monitor.mouse.up(); await settled();
+    assert.ok(state.bottomBar.pieces.cover.x > 0.5);
+    assert.ok(state.bottomBar.pieces.cover.y > 0.5);
+    close(await geometry(monitor, "card:0"), cardBeforeCover, "cover drag leaves cards in place");
+    for (const [id, value] of [["pieceWidth", 75], ["pieceHeight", 125]]) {
+      await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
+      await settled();
+    }
+    assert.equal(state.bottomBar.pieces.cover.scaleX, 0.75);
+    assert.equal(state.bottomBar.pieces.cover.scaleY, 1.25);
+    const resizedCover = await geometry(monitor, "cover");
+    assert.ok(Math.abs(resizedCover.width / coverBefore.width - 0.75) < 0.01);
+    assert.ok(Math.abs(resizedCover.height / coverBefore.height - 1.25) < 0.01);
+    close(resizedCover, await geometry(overlay, "cover"), "cover resize reaches overlay");
+    for (const value of [0, 50, 100]) {
+      await monitor.$eval("#imageOpacity", (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
+      await settled();
+      await overlay.waitForFunction(value => document.querySelector('[data-target="cover"] img').style.opacity === String(value / 100), { polling: 50 }, value);
+      assert.equal(state.bottomBar.pieces.cover.imageOpacity, value / 100);
+      if (value === 50) {
+        await monitor.screenshot({ path: "/private/tmp/fff-cover-monitor-review.png" });
+        await overlay.screenshot({ path: "/private/tmp/fff-cover-overlay-review.png", omitBackground: true });
+      }
+    }
+    await monitor.click('[data-layer="back"]');
+    await monitor.waitForFunction(() => lastState.layers.cover === 0);
+    await overlay.waitForFunction(() => document.querySelector('[data-target="cover"]').style.zIndex === "0", { polling: 50 });
+    await monitor.click('[data-layer="front"]');
+    await monitor.waitForFunction(() => lastState.layers.cover === Math.max(...Object.values(lastState.layers)));
+    const coverFront = Math.max(...Object.values(state.bottomBar.layers));
+    await overlay.waitForFunction(layer => document.querySelector('[data-target="cover"]').style.zIndex === String(layer), { polling: 50 }, coverFront);
+    assert.deepEqual(state.pieces, {});
+    assert.deepEqual(state.layers, {});
+    await monitor.click("#reset"); await settled();
+    assert.equal(state.bottomBar.pieces.cover, undefined);
+    close(await geometry(monitor, "cover"), coverBefore, "cover reset restores geometry");
+    assert.equal(await overlay.$eval('[data-target="cover"] img', el => el.style.opacity), "1", "card template opacity does not affect cover");
+    state.bottomBar.coverUrl = ""; push();
+    await overlay.waitForFunction(() => document.querySelector('[data-target="cover"] img').hidden, { polling: 50 });
+    console.log("PASS: Cover pointer drag, resize, opacity, layer save, reset/removal and template/mode isolation");
+    templateDelay = 500;
+    await monitor.$eval("#templateOpacity", el => { el.value = 25; el.dispatchEvent(new Event("change")); });
+    await monitor.click("#templateApply");
+    await monitor.select("#editMode", "scoreboard");
+    await monitor.select("#editMode", "bottomBar");
+    await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
+    assert.equal(await monitor.$eval("#templateOpacity", el => el.value), "25", "mode round-trip refreshes saved template draft");
+    templateDelay = 0;
+    state.bottomBar.logoPresidentId = "missing"; push();
+    await overlay.waitForFunction(() => document.querySelector('[data-target="logo"] img').hidden);
+    assert.equal(await overlay.$eval('[data-target="logo"]', el => getComputedStyle(el).backgroundColor), "rgba(0, 0, 0, 0)");
+    await monitor.click("#templateFit");
+    await monitor.screenshot({ path: "/private/tmp/fff-bottom-bar-monitor.png" });
+    await overlay.screenshot({ path: "/private/tmp/fff-bottom-bar-overlay.png", omitBackground: true });
+    console.log("Clear precondition:", await overlay.evaluate(() => ({ visibility: document.visibilityState, stream: stream.readyState, phase: lastState.phase, transition: transition && { entering: transition.entering, generation: transition.generation } })));
+    state.phase = "collecting"; push();
+    await overlay.waitForFunction(() => lastState.phase === "collecting", { polling: 50 });
+    await overlay.waitForFunction(() => document.getElementById("wrap").hidden, { polling: 50 });
+    console.log("PASS: bottom-bar 0/1/14/odd geometry, mode isolation, opacity and Clear");
     assert.deepEqual(errors, []);
     console.log("PASS: roster changes, clear, reload, selected/all resets, empty roster, no JS errors");
   } finally {

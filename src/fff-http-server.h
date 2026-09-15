@@ -76,7 +76,7 @@ private:
 		  const QByteArray &cacheControl = "no-store");
 	void sendJson(QTcpSocket *socket, int code, const QByteArray &json);
 	void sendWebFile(QTcpSocket *socket, const QString &name, const QByteArray &contentType);
-	void sendCard(QTcpSocket *socket, const QString &presidentId);
+	void sendCard(QTcpSocket *socket, const QString &presidentId, const QString &kind = QStringLiteral("card"));
 
 	FffSession *m_session = nullptr;
 	QTcpServer *m_server = nullptr;

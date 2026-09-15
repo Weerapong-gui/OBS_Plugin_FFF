@@ -49,3 +49,23 @@ targets; absent entries use the existing grid and legacy `layout` values.
 `{"target":"card:<president-id>","action":"front|forward|backward|back"}`
 เพื่อจัดลำดับซ้อนของการ์ดหรือ `heading` แบบบันทึกถาวร. SSE state ส่ง `layers`
 เป็น map ของ target ไปยัง z-index; reset all ล้าง map นี้.
+
+## BOTTOM BAR
+
+State adds `displayMode: "scoreboard" | "bottomBar"` and a `bottomBar` object
+containing `layout`, `pieces`, `layers`, `cardTemplate`, and `logoPresidentId`.
+Roster entries add `bottomBarUrl` and `logoUrl`. Existing scoreboard fields and
+requests remain compatible. Sessions without the new fields start in scoreboard.
+
+Layout/layer/template POST bodies accept `mode` (omitted means `scoreboard`).
+Bottom Bar uses `card:<id>` and `logo` targets. Optional layout `imageOpacity`
+and `resultOpacity` range from 0 to 1; omitted values inherit template opacity,
+then 1. Template `image.opacity` and `result.opacity` apply to all inheriting slots.
+`POST /api/display` with `{"mode":"bottomBar"}` reveals that mode without clearing
+votes; `POST /api/logo` with `{"presidentId":"id"}` selects only the central logo
+(use an empty ID to clear). Both are localhost-only.
+
+Extended native/browser checks cover mode isolation, old session defaults,
+0/1/14/odd rosters, logo deletion, live votes, Clear, opacity, image replacement,
+geometry parity, and persistence rollback. Browser screenshots use fixture PNGs;
+actual school artwork and loading the built plugin in OBS remain manual checks.
