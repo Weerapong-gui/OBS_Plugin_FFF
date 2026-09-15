@@ -77,9 +77,22 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await overlay.waitForFunction(() => board.getAnimations({ subtree: true }).length === 0, { polling: 20 });
     const resting = async page => assert.equal(await page.evaluate(() => [...board.querySelectorAll(".bottom-motion")].every(el => {
       const css = getComputedStyle(el);
-      return css.clipPath === "none" && css.maskImage === "none" && !el.querySelector(".bottom-wipe");
-    })), true, "resting and Monitor cards have no temporary clipping or wipe");
+      return css.clipPath === "none" && css.maskImage === "none" && css.transform === "none" &&
+        css.opacity === "1" && css.willChange === "auto" && !el.querySelector(".bottom-wipe");
+    })), true, "resting and Monitor pieces release clipping, wipes, transforms and compositing hints");
     await resting(overlay); await resting(monitor);
+    for (const page of [overlay, monitor]) {
+      const mutations = await page.evaluate(s => {
+        const observer = new MutationObserver(() => {});
+        observer.observe(board, { childList: true });
+        s.presidents[0].vote = "red";
+        render(s);
+        const count = observer.takeRecords().length;
+        observer.disconnect();
+        return count;
+      }, state);
+      assert.equal(mutations, 0, "live vote keeps existing pieces attached and in place");
+    }
     // Isolated pages give each roster a genuine fresh reveal, with all effects frozen
     // in the same JS turn so timing assertions do not depend on scheduler speed.
     for (const count of [0, 1, 5, 14, 40]) {
@@ -87,25 +100,49 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       await page.evaluateOnNewDocument(() => { window.EventSource = class {}; });
       await page.goto(`http://127.0.0.1:${server.address().port}/overlay`);
       const roster = { ...state, presidents: Array.from({ length: count }, (_, i) => ({
-        id: String(i), name: String(i), vote: i % 2 ? "none" : i % 4 ? "red" : "green", bottomBarUrl: PNG
+        id: String(i), name: "Fixture " + (i + 1), school: "Test school", vote: i % 2 ? "none" : i % 4 ? "red" : "green", bottomBarUrl: PNG
       })) };
       const capture = process.env.FFF_MOTION_SCREENSHOTS && count === 14;
       if (capture) {
         await page.setViewport({ width: 1920, height: 1080 });
         const artwork = await page.evaluate(() => {
-          const c = document.createElement("canvas"); c.width = 850; c.height = 250;
+          // Portrait school-card specimens, drawn at 2x the default slot size.
+          // Alpha windows expose the real result layer, including waiting slots.
+          const c = document.createElement("canvas"); c.width = 242; c.height = 500;
           const ctx = c.getContext("2d");
-          ctx.fillStyle = "#132634"; ctx.fillRect(0, 35, 850, 180);
-          ctx.strokeStyle = "#8ac9df"; ctx.lineWidth = 5; ctx.strokeRect(12, 47, 826, 156);
-          ctx.fillStyle = "#fff"; ctx.font = "bold 42px sans-serif"; ctx.fillText("FIGHT FOR FLAG", 30, 110);
-          ctx.font = "28px sans-serif"; ctx.fillText("MOTION REVIEW", 30, 160);
-          const card = c.toDataURL(); ctx.clearRect(0, 0, 850, 250);
-          ctx.fillStyle = "#dfac54"; ctx.beginPath(); ctx.arc(425, 125, 115, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = "#132634"; ctx.font = "bold 58px sans-serif"; ctx.fillText("FFF", 370, 146);
-          return { card, logo: c.toDataURL() };
+          const cards = Array.from({ length: 14 }, (_, i) => {
+            ctx.clearRect(0, 0, c.width, c.height);
+            ctx.fillStyle = "rgba(17, 25, 35, .88)"; ctx.fillRect(6, 8, 230, 372);
+            ctx.strokeStyle = "#b9c8d2"; ctx.lineWidth = 2; ctx.strokeRect(9, 11, 224, 478);
+            ctx.fillStyle = "#e2c585"; ctx.fillRect(22, 24, 32, 4);
+            ctx.strokeStyle = "#e2c585"; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(121, 86); ctx.lineTo(183, 124);
+            ctx.lineTo(170, 211); ctx.lineTo(121, 251); ctx.lineTo(72, 211);
+            ctx.lineTo(59, 124); ctx.closePath(); ctx.stroke();
+            ctx.textAlign = "center"; ctx.fillStyle = "#f1f4f6";
+            ctx.font = "bold 54px sans-serif"; ctx.fillText(String(i + 1).padStart(2, "0"), 121, 190);
+            ctx.font = "22px sans-serif"; ctx.fillText("SCHOOL", 121, 304);
+            ctx.font = "16px sans-serif"; ctx.fillText("FIXTURE ARTWORK", 121, 337);
+            // The bottom window is transparent; it is never painted red/green here.
+            ctx.fillStyle = "#111923"; ctx.fillRect(6, 454, 230, 40);
+            ctx.fillStyle = "#c0cbd4"; ctx.font = "14px sans-serif"; ctx.fillText("STUDENT COUNCIL", 121, 479);
+            return c.toDataURL();
+          });
+          c.width = 440; c.height = 500;
+          ctx.strokeStyle = "#e2c585"; ctx.lineWidth = 3; ctx.fillStyle = "#111923";
+          ctx.beginPath(); ctx.moveTo(220, 56); ctx.lineTo(366, 230); ctx.lineTo(220, 402);
+          ctx.lineTo(74, 230); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.textAlign = "center"; ctx.fillStyle = "#f1f4f6";
+          ctx.font = "bold 66px sans-serif"; ctx.fillText("FFF", 220, 249);
+          ctx.fillStyle = "#e2c585"; ctx.font = "18px sans-serif"; ctx.fillText("FIGHT FOR FLAG", 220, 440);
+          const logo = c.toDataURL();
+          c.width = 1920; c.height = 1080;
+          ctx.fillStyle = "#b9c8d2"; ctx.fillRect(0, 824, 850, 2); ctx.fillRect(1070, 824, 850, 2);
+          ctx.fillStyle = "#e2c585"; ctx.fillRect(850, 824, 18, 2); ctx.fillRect(1052, 824, 18, 2);
+          return { cards, logo, cover: c.toDataURL() };
         });
-        roster.bottomBar = { ...roster.bottomBar, coverUrl: "", logoPresidentId: "0" };
-        roster.presidents.forEach(p => { p.bottomBarUrl = artwork.card; p.logoUrl = artwork.logo; });
+        roster.bottomBar = { ...roster.bottomBar, coverUrl: artwork.cover, logoPresidentId: "0" };
+        roster.presidents.forEach((p, i) => { p.bottomBarUrl = artwork.cards[i]; p.logoUrl = artwork.logo; });
       }
       if (capture) await page.evaluate(() => {
         window.motionFixtureTimeout = window.setTimeout;
@@ -123,10 +160,23 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
         await page.setViewport({ width: 1920, height: 1080 });
         await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => {}))); });
         for (const time of [0, 180, 350, 600, 800]) {
-          await page.evaluate(time => { for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = time; } }, time);
+          await page.evaluate(async time => {
+            for (const a of board.getAnimations({ subtree: true })) {
+              if (time >= a.effect.getComputedTiming().endTime) a.finish();
+              else { a.pause(); a.currentTime = time; }
+            }
+            // Let per-piece cleanup and compositor updates settle before capture.
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          }, time);
+          await pause(100);
           await page.screenshot({ path: `/private/tmp/fff-motion-${time}.png`, omitBackground: true });
         }
-        await page.evaluate(() => { window.setTimeout = window.motionFixtureTimeout; });
+        await page.evaluate(() => {
+          window.setTimeout = window.motionFixtureTimeout;
+          // Start a fresh, frozen presentation for the interruption checks below.
+          animateBottom(true);
+          for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 0; }
+        });
       }
       assert.equal(entries.length, count);
       for (let i = 0; i < count; i++) {
@@ -160,10 +210,16 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
           }
           s.presidents.push({ id: "added", name: "Added", vote: "red" }); render(s);
           const added = board.querySelector('[data-target="card:added"] .bottom-motion');
-          return { results, addedRest: added.getAnimations({ subtree: true }).length === 0 && getComputedStyle(added).clipPath === "none" };
+          const identities = new Map([...board.children].map(piece => [piece.dataset.target, piece]));
+          s.presidents.reverse(); render(s);
+          const order = [...board.children].map(piece => piece.dataset.target);
+          return { results, addedRest: added.getAnimations({ subtree: true }).length === 0 && getComputedStyle(added).clipPath === "none",
+            reordered: order.join() === [...s.presidents.map(p => "card:" + p.id), "logo", "cover"].join() &&
+              [...board.children].every(piece => identities.get(piece.dataset.target) === piece) && el.getAnimations()[0] === a };
         }, roster);
         assert.ok(updates.results.every(Boolean), "vote colors and result opacity update wipe without replay");
         assert.equal(updates.addedRest, true, "card added mid-entrance appears at rest");
+        assert.equal(updates.reordered, true, "roster reorder preserves keyed pieces and surviving animations");
       }
       await page.evaluate(() => { for (const a of board.getAnimations({ subtree: true })) a.finish(); });
       await page.waitForFunction(() => !transition, { polling: 20 });
@@ -171,7 +227,11 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       if (capture) {
         await page.evaluate(s => render(s), roster);
         await page.screenshot({ path: "/private/tmp/fff-motion-rest.png", omitBackground: true });
-        await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, roster);
+        await monitor.evaluate(s => {
+          editMode = "bottomBar"; document.getElementById("editMode").value = editMode;
+          render(s);
+          document.getElementById("editMode").dispatchEvent(new Event("change"));
+        }, roster);
         await monitor.screenshot({ path: "/private/tmp/fff-motion-monitor.png" });
         await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, state);
       }

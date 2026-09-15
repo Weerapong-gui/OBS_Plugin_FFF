@@ -84,9 +84,16 @@ cover 300ms, cards 450ms with an 80ms start and center-out pairs 45ms apart
 (stagger capped at 420ms), and interrupted exits 240ms. It samples animation
 progress directly, exercises roster changes and template overflow during entry,
 and checks that resting Overlay and Monitor retain no temporary wipe or clip.
+Live vote updates must leave existing pieces attached; roster reordering keeps
+their identities and in-flight animations. Resting pieces also release animation
+transforms and compositor hints (`will-change`).
 The 14-card entrance ends at 800ms; the maximum entrance is 950ms.
 
 Set `FFF_MOTION_SCREENSHOTS=1` for deterministic 1920×1080 fixture captures:
 `/private/tmp/fff-motion-{0,180,350,600,800,rest,monitor}.png`. The test pauses
 Web Animations at the requested times and uses synthetic transparent PNGs;
 it never reads or writes the real OBS session.
+The preview artwork uses portrait school specimens with transparent vote windows,
+a central fixture logo and a transparent Cover containing only thin top rules.
+These graphics exist only in the test. Finished effects are settled and the
+compositor is given time to rasterize each frozen frame before capture.

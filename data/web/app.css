@@ -532,7 +532,7 @@ body.monitor {
 .bottom-motion { position:relative; width:100%; height:100%; }
 .bottom-wipe { position:absolute; top:0; height:12px; pointer-events:none; z-index:2147483647; }
 .center-logo .bottom-motion img { width:100%; height:100%; object-fit:contain; }
-.overlay .bottom-bar .bottom-motion { will-change:transform,opacity; }
+.overlay .bottom-bar .bottom-motion.is-animating { will-change:transform,opacity; }
 .monitor .empty-logo { outline: 2px dashed #88929f; }
 .monitor .empty-logo::after { content: "โลโก้กลาง"; margin: auto; color: #88929f; }
 .opacity-controls { display: inline-flex; gap: 10px; flex-wrap: wrap; }

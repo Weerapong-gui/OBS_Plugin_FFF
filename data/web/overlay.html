@@ -78,11 +78,13 @@ function animateBottom(entering, done = () => {}) {
     const options = { duration, delay, easing: entering ? BOTTOM_TIMING.easing : "ease-in", fill: "both" };
     const motions = [];
     let wipe, cleaned = false;
+    element.classList.add("is-animating");
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
       for (const animation of motions) animation.cancel();
       wipe?.remove();
+      element.classList.remove("is-animating");
       element._refreshReveal = null;
       element._cancelPresentation = null;
     };

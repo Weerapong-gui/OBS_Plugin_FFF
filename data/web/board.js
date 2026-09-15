@@ -68,7 +68,10 @@
       else slot.img.removeAttribute("src");
       slot.img.hidden = !url;
       slot.root.className = "slot " + (president.vote !== "none" && (opts.revealed || opts.showVotes) ? president.vote : "waiting");
-      root.appendChild(slot.piece);
+      // Leave connected pieces in place on ordinary SSE updates. Only an
+      // actual roster reorder should move a keyed card in the DOM.
+      if (root.children[index] !== slot.piece)
+        root.insertBefore(slot.piece, root.children[index] || null);
     });
     for (const [id, slot] of root._slots) if (!seen.has(id)) {
       slot.piece.querySelector(".bottom-motion")?._cancelPresentation?.();
@@ -84,7 +87,8 @@
     if (url) { if (logo.getAttribute("src") !== url) logo.src = url; } else logo.removeAttribute("src");
     logo.hidden = !url;
     root._logo.classList.toggle("empty-logo", !url);
-    root.appendChild(root._logo);
+    if (root.children[state.presidents.length] !== root._logo)
+      root.insertBefore(root._logo, root.children[state.presidents.length] || null);
     if (!root._cover) {
       root._cover = document.createElement("div"); root._cover.className = "piece bottom-cover";
       root._cover.dataset.target = "cover";
@@ -95,7 +99,7 @@
       if (cover.getAttribute("src") !== state.coverUrl) cover.src = state.coverUrl;
     } else cover.removeAttribute("src");
     cover.hidden = !state.coverUrl;
-    root.appendChild(root._cover);
+    if (root.lastElementChild !== root._cover) root.appendChild(root._cover);
   }
 
   // Slots are reused across updates: rebuilding the grid on every vote would
