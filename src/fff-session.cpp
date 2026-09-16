@@ -481,6 +481,23 @@ QString FffSession::coverUrl() const
 	return path.isEmpty() || !QFileInfo::exists(path) ? QString() : QStringLiteral("/api/cover?v=%1").arg(m_cover);
 }
 
+QStringList FffSession::assetPaths() const
+{
+	QStringList paths;
+	for (const FffPresident &president : m_presidents) {
+		for (const QString &kind :
+		     {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo")}) {
+			const QString path = assetPath(president, kind);
+			if (!path.isEmpty())
+				paths.append(path);
+		}
+	}
+	const QString cover = coverPath();
+	if (!cover.isEmpty())
+		paths.append(cover);
+	return paths;
+}
+
 bool FffSession::setCover(const QString &fileName)
 {
 	if (!fileName.isEmpty() &&
@@ -544,6 +561,22 @@ bool FffSession::showMode(const QString &mode)
 	m_phase = FffPhase::Revealed;
 	if (!save()) {
 		m_displayMode = oldMode;
+		m_phase = oldPhase;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	return true;
+}
+bool FffSession::hideDisplay()
+{
+	if (m_phase == FffPhase::Collecting)
+		return true;
+	const auto oldPhase = m_phase;
+	m_phase = FffPhase::Collecting;
+	// Votes, round and the remembered mode all stay: this hides the board,
+	// it does not end the round.
+	if (!save()) {
 		m_phase = oldPhase;
 		emit saveFailed();
 		return false;

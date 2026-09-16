@@ -19,6 +19,7 @@ GPL-2.0-or-later
 #include <QNetworkInterface>
 #include <QPointer>
 #include <QRandomGenerator>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -72,7 +73,16 @@ FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(par
 	connect(m_heartbeat, &QTimer::timeout, this, &FffHttpServer::sendHeartbeat);
 
 	connect(m_session, &FffSession::changed, this, [this]() {
-		m_cardCache.clear();
+		// Keep artwork that is still in play: a vote must not throw away a
+		// roster's worth of PNGs the next reveal is about to ask for again.
+		const QStringList paths = m_session->assetPaths();
+		const QSet<QString> live(paths.cbegin(), paths.cend());
+		for (auto it = m_cardCache.begin(); it != m_cardCache.end();) {
+			if (live.contains(it.key()))
+				++it;
+			else
+				it = m_cardCache.erase(it);
+		}
 		pushState();
 	});
 }
@@ -663,10 +673,24 @@ void FffHttpServer::sendCard(QTcpSocket *socket, const QString &presidentId, con
 	const QString path = kind == QLatin1String("cover")
 				     ? m_session->coverPath()
 				     : (president ? m_session->assetPath(*president, kind) : QString());
-	QFile file(path);
-	if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+	if (path.isEmpty()) {
 		send(socket, 404, "text/plain; charset=utf-8", "no asset");
 		return;
 	}
-	send(socket, 200, "image/png", file.readAll());
+
+	auto cached = m_cardCache.find(path);
+	if (cached == m_cardCache.end()) {
+		QFile file(path);
+		if (!file.open(QIODevice::ReadOnly)) {
+			send(socket, 404, "text/plain; charset=utf-8", "no asset");
+			return;
+		}
+		// Reading once keeps the reveal off the disk: the overlay asks for a
+		// roster's worth of PNGs and this all runs on the OBS UI thread.
+		cached = m_cardCache.insert(path, file.readAll());
+	}
+
+	// Every import lands under a fresh UUID file name and the URL carries it as
+	// ?v=, so a given asset URL can never change content.
+	send(socket, 200, "image/png", cached.value(), "public, max-age=31536000, immutable");
 }

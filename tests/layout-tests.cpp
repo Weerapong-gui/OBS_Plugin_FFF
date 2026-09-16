@@ -104,6 +104,20 @@ int main(int argc, char **argv)
 		reply->deleteLater();
 		return result;
 	};
+	auto coverCacheControl = [&]() {
+		auto *reply = network.get(
+			QNetworkRequest(QUrl(QStringLiteral("http://127.0.0.1:%1/api/cover").arg(server.boundPort()))));
+		QEventLoop loop;
+		QTimer timer;
+		timer.setSingleShot(true);
+		QObject::connect(&timer, &QTimer::timeout, reply, &QNetworkReply::abort);
+		QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+		timer.start(3000);
+		loop.exec();
+		const QByteArray header = reply->rawHeader("Cache-Control");
+		reply->deleteLater();
+		return header;
+	};
 	auto postLayer = [&](const QByteArray &body) {
 		QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/api/layer").arg(server.boundPort())));
 		request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
@@ -183,6 +197,18 @@ int main(int argc, char **argv)
 	check(session.displayMode() == QLatin1String("bottomBar") && session.voteOf(person.id) == FffVote::Green &&
 		      session.round() == roundBefore,
 	      "switch preserves vote and round");
+	check(post(R"({"mode":"bottomBar"})", QStringLiteral("display")) == 200, "show bottom bar again");
+	// Turning a display mode off is a toggle, not the end of the round.
+	check(session.hideDisplay(), "hide the board");
+	check(state(session).value("phase").toString() == QLatin1String("collecting"), "hiding blanks the stream");
+	check(session.voteOf(person.id) == FffVote::Green && session.round() == roundBefore &&
+		      session.displayMode() == QLatin1String("bottomBar"),
+	      "hiding keeps votes, round and the remembered mode");
+	check(session.hideDisplay() && session.round() == roundBefore, "hiding again is a no-op");
+	check(post(R"({"mode":"bottomBar"})", QStringLiteral("display")) == 200 &&
+		      state(session).value("phase").toString() == QLatin1String("revealed") &&
+		      session.round() == roundBefore,
+	      "the same round comes straight back");
 	check(post(R"({"mode":"scoreboard"})", QStringLiteral("display")) == 200, "show scoreboard");
 	check(post(R"({"mode":"invalid"})", QStringLiteral("display")) == 400, "invalid display rejected");
 	check(post(R"({"mode":"bottomBar","target":"heading","reset":true})") == 404, "bottom bar rejects heading");
@@ -238,6 +264,16 @@ int main(int argc, char **argv)
 	      "cover HTTP endpoint serves imported bytes");
 	const QString firstCoverPath = session.coverPath();
 	const QString firstCoverUrl = session.coverUrl();
+	// Imports get a fresh UUID file name that the URL carries as ?v=, so the
+	// overlay may keep artwork forever and never refetch it on a reveal.
+	check(coverCacheControl() == "public, max-age=31536000, immutable", "cover bytes are cacheable for good");
+	const QString movedCover = firstCoverPath + QStringLiteral(".away");
+	check(QFile::rename(firstCoverPath, movedCover), "cover file can be moved aside");
+	check(getCover() == qMakePair(200, QByteArray::fromHex("89504e470d0a1a0a")),
+	      "cover repeats from memory instead of the disk");
+	check(session.setVote(person.id, FffVote::Green) && getCover().first == 200,
+	      "a vote does not evict artwork that is still in play");
+	check(QFile::rename(movedCover, firstCoverPath), "cover file restored");
 	const QString replacementCover = session.importAsset(png.fileName(), QString(), QStringLiteral("cover"));
 	check(!replacementCover.isEmpty() && replacementCover != firstCover && QFile::exists(firstCoverPath),
 	      "staging cover preserves previous file and creates a unique filename");
@@ -317,6 +353,7 @@ int main(int argc, char **argv)
 	check(!session.setLogoPresident(QString()), "failed logo selection reported");
 	check(!session.setVote(person.id, FffVote::Red), "failed vote reported");
 	check(!session.clearRound(), "failed clear reported");
+	check(!session.hideDisplay(), "failed hide reported");
 	check(!session.removePresident(person.id), "failed delete reported");
 	auto editedPerson = person;
 	editedPerson.name = QStringLiteral("changed");

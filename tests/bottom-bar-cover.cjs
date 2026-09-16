@@ -11,7 +11,16 @@ const state = { phase: "revealed", round: 1, displayMode: "bottomBar", voted: 1,
   bottomBar: { coverUrl: PNG, pieces: {}, layers: {}, logoPresidentId: "a" },
   presidents: [{ id: "a", name: "A", school: "School", vote: "green", bottomBarUrl: PNG, logoUrl: PNG },
     { id: "b", name: "B", school: "School", vote: "none", bottomBarUrl: "" }] };
+const PNG_BYTES = Buffer.from(PNG.split(",")[1], "base64");
+// Counted per URL so the reveal can be checked for doing no fetching at all.
+const served = new Map();
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith("/img/")) {
+    served.set(req.url, (served.get(req.url) || 0) + 1);
+    res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "public, max-age=31536000, immutable" });
+    res.end(PNG_BYTES);
+    return;
+  }
   const file = path.join(web, req.url === "/monitor" ? "monitor.html" : req.url === "/overlay" ? "overlay.html" : req.url.slice(1));
   if (!file.startsWith(web + path.sep) || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
   res.setHeader("Content-Type", file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : "text/html");
@@ -367,6 +376,78 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       return before.length > 0 && before.every(a => after.includes(a) && a.currentTime === 100);
     }, state);
     assert.equal(scoreboardContinuous, true, "scoreboard vote preserves reveal animation");
+
+    // Artwork has to be fetched, decoded and laid out while the stream is still
+    // clean, so the press itself only flips visibility and starts animations.
+    const warm = await browser.newPage();
+    warm.on("pageerror", error => errors.push(error.message));
+    await warm.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+    await warm.setViewport({ width: 1920, height: 1080 });
+    await warm.goto(`http://127.0.0.1:${server.address().port}/overlay`);
+    const asset = `http://127.0.0.1:${server.address().port}/img/`;
+    const warming = { phase: "collecting", round: 9, displayMode: "bottomBar", voted: 0, total: 3,
+      layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {},
+      bottomBar: { coverUrl: asset + "cover.png", pieces: {}, layers: {}, logoPresidentId: "a" },
+      presidents: ["a", "b", "c"].map(id => ({ id, name: id, school: "S", vote: "none",
+        bottomBarUrl: `${asset}${id}.png`, logoUrl: `${asset}${id}-logo.png` })) };
+    await warm.evaluate(s => render(s), warming);
+    await warm.waitForFunction(() => warmed.size > 0 && [...warmed.values()].every(image => image.complete),
+      { polling: 20 });
+    const blank = await warm.evaluate(() => {
+      const images = [...board.querySelectorAll("img[src]")];
+      return { hidden: wrap.hidden, pieces: board.querySelectorAll(".piece").length, images: images.length,
+        ready: images.every(image => image.complete && image.naturalWidth > 0),
+        painted: getComputedStyle(wrap).visibility,
+        laidOut: [...board.querySelectorAll(".piece")].every(piece => piece.offsetWidth > 0) };
+    });
+    assert.equal(blank.hidden, true, "a collecting round stays off the stream");
+    assert.equal(blank.painted, "hidden", "the prepared board paints nothing");
+    assert.equal(blank.pieces, 5, "cards, logo and cover are mounted before the press");
+    assert.equal(blank.images, 5, "every on-air image already has its source");
+    assert.equal(blank.ready, true, "every on-air image is decoded before the press");
+    assert.equal(blank.laidOut, true, "the blank board keeps its geometry");
+    const beforeReveal = JSON.stringify([...served].sort());
+    const opened = await warm.evaluate(s => {
+      render({ ...s, phase: "revealed" });
+      return { shown: !wrap.hidden, animating: board.getAnimations({ subtree: true }).length };
+    }, warming);
+    assert.equal(opened.shown, true, "the press reveals in the same task");
+    assert.ok(opened.animating > 0, "the entrance starts in the same task");
+    await warm.waitForFunction(() => !transition, { polling: 20 });
+    assert.equal(JSON.stringify([...served].sort()), beforeReveal, "revealing fetches nothing");
+    // A mode button pressed twice blanks the stream without ending the round,
+    // so the same votes have to be able to come straight back.
+    const hidden = { ...warming, phase: "revealed" };
+    await warm.evaluate(s => render(s), hidden);
+    await warm.waitForFunction(() => !transition, { polling: 20 });
+    await warm.evaluate(s => render({ ...s, phase: "collecting" }), hidden);
+    const exiting = await warm.evaluate(() => ({
+      entering: transition && transition.entering,
+      duration: board.querySelector('[data-target="card:a"] .bottom-motion').getAnimations()[0].effect.getTiming().duration
+    }));
+    assert.equal(exiting.entering, false, "hiding plays the exit, not a cut");
+    assert.equal(exiting.duration, 240, "hiding uses the documented exit timing");
+    await warm.waitForFunction(() => wrap.hidden, { polling: 20 });
+    const restored = await warm.evaluate(s => {
+      render(s);
+      return { shown: !wrap.hidden, round: s.round, animating: board.getAnimations({ subtree: true }).length };
+    }, hidden);
+    assert.equal(restored.shown, true, "the same round comes straight back");
+    assert.ok(restored.animating > 0, "and replays the entrance");
+    await warm.waitForFunction(() => !transition, { polling: 20 });
+
+    // Warmed artwork is held for what is on the roster and nothing else, so
+    // rounds and roster edits cannot grow it without bound.
+    const warmedSizes = await warm.evaluate(s => {
+      const full = warmed.size;
+      render({ ...s, presidents: s.presidents.slice(0, 1), total: 1,
+        bottomBar: { ...s.bottomBar, coverUrl: "" }, phase: "collecting", round: s.round + 1 });
+      return { full, trimmed: warmed.size };
+    }, warming);
+    assert.equal(warmedSizes.full, 7, "three cards, three logos and a cover are warmed");
+    assert.equal(warmedSizes.trimmed, 2, "artwork that left the roster is dropped");
+    await warm.close();
+
     assert.deepEqual(errors, []);
     console.log("bottom-bar cover and transition browser checks passed");
   } finally { await browser.close(); server.close(); }

@@ -1,6 +1,11 @@
 // Shared by /overlay and /monitor so the operator's preview and the stream
 // never drift apart.
 (function () {
+  // The overlay decodes its artwork before the reveal, so painting it
+  // synchronously keeps the first frame whole. The monitor has no such
+  // preparation and would rather not block on a decode.
+  const onAir = document.body.classList.contains("overlay");
+
   function fitCardToImage(slot) {
     if (slot.piece.closest(".bottom-bar")) return;
     if (!slot.img.naturalWidth || !slot.img.naturalHeight) return;
@@ -31,6 +36,7 @@
     const result = document.createElement("div");
     img.className = "card-image";
     img.alt = "";
+    img.decoding = onAir ? "sync" : "async";
     result.className = "result";
     root.append(img, result);
     piece.appendChild(root);
@@ -176,20 +182,37 @@
   // Keep the natural grid as a measuring frame for old sessions and resets.
   // Moving the outer piece leaves that frame intact; the inner card can still
   // animate on reveal without overwriting its saved position or scale.
+  // Three passes on purpose: everything that can move a box is written first,
+  // every measurement is taken together, and the rest of the writes touch only
+  // transform, opacity and z-index. That costs one layout flush instead of one
+  // per piece, which matters most on the frame the overlay opens.
   window.applyPieceLayouts = function (wrap, state, overrides) {
     const base = state.layout || { x: 0.5, y: 0.5, scale: 1 };
+    const pieces = [...wrap.querySelectorAll(".piece")];
     applyLayout(wrap, base);
-    const layouts = new Map();
-    for (const piece of wrap.querySelectorAll(".piece")) {
+    wrap._templateActive = !!state.cardTemplate;
+    for (const piece of pieces) {
+      const slot = piece.querySelector(".slot");
+      if (slot) applyCardTemplate(slot, state.cardTemplate);
+    }
+
+    const measured = pieces.map(piece => {
       let x = piece.offsetWidth / 2;
       let y = piece.offsetHeight / 2;
       for (let node = piece; node && node !== wrap; node = node.offsetParent) {
         x += node.offsetLeft;
         y += node.offsetTop;
       }
+      return { piece: piece, x: x, y: y };
+    });
+    const wrapWidth = wrap.offsetWidth;
+    const wrapHeight = wrap.offsetHeight;
+
+    const layouts = new Map();
+    for (const { piece, x, y } of measured) {
       const natural = {
-        x: base.x + (x - wrap.offsetWidth / 2) * base.scale / 1920,
-        y: base.y + (y - wrap.offsetHeight / 2) * base.scale / 1080,
+        x: base.x + (x - wrapWidth / 2) * base.scale / 1920,
+        y: base.y + (y - wrapHeight / 2) * base.scale / 1080,
         scale: base.scale
       };
       const key = piece.dataset.target;
@@ -203,16 +226,10 @@
       const resultScaleX = layout.resultScaleX || 1;
       const resultScaleY = layout.resultScaleY || 1;
       const result = piece.querySelector(".result");
-      const slot = piece.querySelector(".slot");
-      if (slot) {
-        piece.closest(".board-wrap")._templateActive = !!state.cardTemplate;
-        applyCardTemplate(slot, state.cardTemplate);
-      }
       if (result && !state.cardTemplate) result.style.transform = `scale(${resultScaleX}, ${resultScaleY})`;
       const image = piece.querySelector(".card-image");
       if (image) image.style.opacity = String(layout.imageOpacity ?? (!key.startsWith("card:") ? 1 : state.cardTemplate?.image?.opacity) ?? 1);
       if (result) result.style.opacity = String(layout.resultOpacity ?? state.cardTemplate?.result?.opacity ?? 1);
-      piece.querySelector(".bottom-motion")?._refreshReveal?.();
       const layer = state.layers && state.layers[key];
       // Match native layer ordering before the first explicit layer edit.
       const defaultLayer = key === "cover" ? state.presidents.length + 1 :

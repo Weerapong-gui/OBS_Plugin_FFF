@@ -11,6 +11,7 @@ GPL-2.0-or-later
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 enum class FffPhase { Collecting, Revealed };
@@ -94,6 +95,9 @@ public:
 
 	static bool validMode(const QString &mode);
 	bool showMode(const QString &mode);
+	// Take the stream back to blank without ending the round: the operator
+	// can put the same votes back up a moment later.
+	bool hideDisplay();
 	bool setLogoPresident(const QString &id);
 	QString displayMode() const { return m_displayMode; }
 	QString logoPresidentId() const { return m_logoPresidentId; }
@@ -102,6 +106,9 @@ public:
 	QString assetUrl(const FffPresident &president, const QString &kind) const;
 	QString coverPath() const;
 	QString coverUrl() const;
+	// Every asset file the session currently points at, so a cache can drop
+	// only the entries a roster or artwork change actually orphaned.
+	QStringList assetPaths() const;
 	QString cover() const { return m_cover; }
 	bool setCover(const QString &fileName);
 	QString cardsDir() const;

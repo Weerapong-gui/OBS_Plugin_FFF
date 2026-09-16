@@ -138,7 +138,7 @@
       draft = clone(submitted);
       dirty = false;
       el("templateStatus").textContent = "ใช้แม่แบบกับทุกการ์ดแล้ว";
-    } catch (error) { if (state.mode === requestMode) { dirty = false; draft = initial(); el("templateStatus").textContent = "บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว"; } }
+    } catch (error) { if (state.mode === requestMode) { dirty = false; draft = initial(); el("templateStatus").textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว"; } }
     finally { clearTimeout(timer); saving = false; paint(); }
   };
   window.templateEditor = { update(next, card) {

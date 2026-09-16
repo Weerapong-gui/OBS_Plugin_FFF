@@ -36,6 +36,15 @@ enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3, ColBottomBar 
 
 constexpr int kVisibleRows = 6;
 
+// The two mode buttons sit side by side, so "on air" has to be unmistakable
+// against its sibling rather than a faint default check mark. Green stays
+// reserved for "everyone has voted" in the summary above.
+const QString kModeButtonStyle = QStringLiteral(
+	"QPushButton { border: 1px solid #3a4452; border-radius: 6px; padding: 8px 12px; font-weight: 700; }"
+	"QPushButton:hover { border-color: #4d9dff; }"
+	"QPushButton:checked { background: #4d9dff; color: #0e1116; border-color: #4d9dff; }"
+	"QPushButton:focus { border-color: #4d9dff; }");
+
 } // namespace
 
 /*
@@ -56,6 +65,7 @@ private:
 	void addUrlRow(const QString &label, const QString &url);
 	QString selectedPresidentId() const;
 	void toggleServer();
+	void toggleMode(const QString &mode);
 	void addPresident();
 	void removeSelected();
 	void chooseCard(const QString &kind);
@@ -75,6 +85,7 @@ private:
 	QLabel *m_summary = nullptr;
 	QLabel *m_layoutLabel = nullptr;
 	QListWidget *m_live = nullptr;
+	QLabel *m_streamStatus = nullptr;
 	QPushButton *m_revealButton = nullptr;
 	QPushButton *m_bottomBarButton = nullptr;
 	QComboBox *m_logoPresident = nullptr;
@@ -215,18 +226,20 @@ void FffDock::buildUi()
 	m_live = new QListWidget(liveBox);
 	liveLayout->addWidget(m_live);
 
+	m_streamStatus = new QLabel(liveBox);
+	m_streamStatus->setWordWrap(true);
+	liveLayout->addWidget(m_streamStatus);
+
+	// Two toggles for one stream: at most one is on air, and pressing the one
+	// that is on air takes the board back to blank without ending the round.
 	m_revealButton = new QPushButton(QStringLiteral("SCOREBOARD"), liveBox);
-	m_revealButton->setMinimumHeight(38);
-	liveLayout->addWidget(m_revealButton);
-	m_revealButton->setCheckable(true);
 	m_bottomBarButton = new QPushButton(QStringLiteral("BOTTOM BAR"), liveBox);
-	m_bottomBarButton->setMinimumHeight(38);
-	m_bottomBarButton->setCheckable(true);
-	liveLayout->addWidget(m_bottomBarButton);
-	auto *resultButton = new QPushButton(QStringLiteral("RESUIT — เร็ว ๆ นี้"), liveBox);
-	resultButton->setEnabled(false);
-	resultButton->setToolTip(QStringLiteral("เร็ว ๆ นี้"));
-	liveLayout->addWidget(resultButton);
+	for (QPushButton *button : {m_revealButton, m_bottomBarButton}) {
+		button->setMinimumHeight(38);
+		button->setCheckable(true);
+		button->setStyleSheet(kModeButtonStyle);
+		liveLayout->addWidget(button);
+	}
 	auto *logoRow = new QHBoxLayout();
 	logoRow->addWidget(new QLabel(QStringLiteral("สำนักสำหรับโลโก้กลาง"), liveBox));
 	m_logoPresident = new QComboBox(liveBox);
@@ -239,7 +252,8 @@ void FffDock::buildUi()
 		}
 	});
 
-	auto *clearButton = new QPushButton(QStringLiteral("Clear — เริ่มรอบใหม่"), liveBox);
+	auto *clearButton = new QPushButton(QStringLiteral("เริ่มรอบใหม่"), liveBox);
+	clearButton->setToolTip(QStringLiteral("ล้างผลโหวตทุกคนแล้วขึ้นรอบถัดไป รายชื่อ PNG และ PIN ยังอยู่ครบ"));
 	clearButton->setMinimumHeight(44);
 	liveLayout->addWidget(clearButton);
 
@@ -263,16 +277,8 @@ void FffDock::buildUi()
 	connect(removeButton, &QPushButton::clicked, this, [this]() { removeSelected(); });
 	connect(cardButton, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("card")); });
 	connect(pinButton, &QPushButton::clicked, this, [this]() { regeneratePin(); });
-	connect(m_revealButton, &QPushButton::clicked, this, [this]() {
-		if (!m_session->showMode(QStringLiteral("scoreboard")))
-			showSaveError();
-		refreshLive();
-	});
-	connect(m_bottomBarButton, &QPushButton::clicked, this, [this]() {
-		if (!m_session->showMode(QStringLiteral("bottomBar")))
-			showSaveError();
-		refreshLive();
-	});
+	connect(m_revealButton, &QPushButton::clicked, this, [this]() { toggleMode(QStringLiteral("scoreboard")); });
+	connect(m_bottomBarButton, &QPushButton::clicked, this, [this]() { toggleMode(QStringLiteral("bottomBar")); });
 	connect(clearButton, &QPushButton::clicked, this, [this]() {
 		if (!m_session->clearRound())
 			showSaveError();
@@ -361,7 +367,8 @@ void FffDock::refreshServer()
 
 	const QStringList addresses = FffHttpServer::lanAddresses();
 	if (addresses.isEmpty()) {
-		auto *warning = new QLabel(QStringLiteral("ยังไม่เจอ IP วง LAN — เช็คว่าต่อ Wi-Fi/router แล้วหรือยัง"), m_urls);
+		auto *warning =
+			new QLabel(QStringLiteral("ยังไม่เจอ IP วง LAN · เช็คว่าต่อ Wi-Fi หรือ router แล้วหรือยัง"), m_urls);
 		warning->setWordWrap(true);
 		m_urlLayout->addWidget(warning);
 		return;
@@ -388,13 +395,13 @@ void FffDock::refreshTable()
 		m_table->setItem(row, ColPin, pin);
 
 		auto *cardItem =
-			new QTableWidgetItem(president.card.isEmpty() ? QStringLiteral("—") : QStringLiteral("มี PNG"));
+			new QTableWidgetItem(president.card.isEmpty() ? QStringLiteral("ยังไม่มี") : QStringLiteral("มี"));
 		cardItem->setFlags(cardItem->flags() & ~Qt::ItemIsEditable);
 		m_table->setItem(row, ColCard, cardItem);
 		for (const auto &asset :
 		     {qMakePair(ColBottomBar, president.bottomBar), qMakePair(ColLogo, president.logo)}) {
-			auto *item = new QTableWidgetItem(asset.second.isEmpty() ? QStringLiteral("—")
-										 : QStringLiteral("มี PNG"));
+			auto *item = new QTableWidgetItem(asset.second.isEmpty() ? QStringLiteral("ยังไม่มี")
+										 : QStringLiteral("มี"));
 			item->setFlags(item->flags() & ~Qt::ItemIsEditable);
 			m_table->setItem(row, asset.first, item);
 		}
@@ -412,19 +419,24 @@ void FffDock::refreshLive()
 	const int voted = m_session->votedCount();
 	const bool ready = total > 0 && voted == total;
 
-	QString phase = QStringLiteral("กำลังรอ");
-	if (revealed)
-		phase = QStringLiteral("ขึ้นจอแล้ว");
-	else if (ready)
-		phase = QStringLiteral("ครบแล้ว พร้อมแสดง");
+	m_summary->setText(QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4")
+				   .arg(m_session->round())
+				   .arg(voted)
+				   .arg(total)
+				   .arg(ready && !revealed ? QStringLiteral("ครบทุกคนแล้ว") : QStringLiteral("กำลังรอ")));
 
-	m_summary->setText(
-		QStringLiteral("รอบ %1 · กดแล้ว %2/%3 · %4").arg(m_session->round()).arg(voted).arg(total).arg(phase));
+	const bool bottomBar = m_session->displayMode() == QLatin1String("bottomBar");
+	// State in words as well as colour, so the operator can read the stream's
+	// state at a glance without relying on the button fill alone.
+	m_streamStatus->setText(
+		revealed ? QStringLiteral("● ออกอากาศ · %1")
+				   .arg(bottomBar ? QStringLiteral("BOTTOM BAR") : QStringLiteral("SCOREBOARD"))
+			 : QStringLiteral("○ จอว่าง"));
 
 	m_revealButton->setEnabled(true);
 	m_bottomBarButton->setEnabled(true);
-	m_revealButton->setChecked(revealed && m_session->displayMode() == QLatin1String("scoreboard"));
-	m_bottomBarButton->setChecked(revealed && m_session->displayMode() == QLatin1String("bottomBar"));
+	m_revealButton->setChecked(revealed && !bottomBar);
+	m_bottomBarButton->setChecked(revealed && bottomBar);
 	{
 		const QSignalBlocker blocker(m_logoPresident);
 		m_logoPresident->clear();
@@ -435,9 +447,9 @@ void FffDock::refreshLive()
 		m_logoPresident->setCurrentIndex(qMax(0, m_logoPresident->findData(m_session->logoPresidentId())));
 	}
 	// Nothing reaches the stream on its own any more, so make the moment
-	// everyone has answered impossible to miss.
-	m_revealButton->setStyleSheet(
-		ready && !revealed ? QStringLiteral("background:#21b04a;color:#ffffff;font-weight:700;") : QString());
+	// everyone has answered impossible to miss. It belongs on the summary, not
+	// on one of the two buttons: either mode is a valid next move.
+	m_summary->setStyleSheet(ready && !revealed ? QStringLiteral("color:#21b04a;font-weight:700;") : QString());
 
 	m_layoutLabel->setText(QStringLiteral("เลือกโหมดแก้ไขในจอมอนิเตอร์ เพื่อลากและปรับขนาด โดยไม่สลับภาพออกอากาศ"));
 
@@ -450,9 +462,9 @@ void FffDock::refreshLive()
 		else if (vote == FffVote::Green)
 			colour = QStringLiteral("เขียว");
 
-		m_live->addItem(QStringLiteral("%1 %2 — %3")
-					.arg(vote == FffVote::None ? QStringLiteral("○") : QStringLiteral("●"),
-					     president.name.isEmpty() ? president.school : president.name, colour));
+		m_live->addItem(QStringLiteral("%1 %2 · %3")
+					.arg(vote == FffVote::None ? QStringLiteral("○") : QStringLiteral("●"), colour,
+					     president.name.isEmpty() ? president.school : president.name));
 	}
 }
 
@@ -463,6 +475,14 @@ QString FffDock::selectedPresidentId() const
 		return QString();
 	QTableWidgetItem *item = m_table->item(row, ColName);
 	return item ? item->data(Qt::UserRole).toString() : QString();
+}
+
+void FffDock::toggleMode(const QString &mode)
+{
+	const bool onAir = m_session->phase() == FffPhase::Revealed && m_session->displayMode() == mode;
+	if (!(onAir ? m_session->hideDisplay() : m_session->showMode(mode)))
+		showSaveError();
+	refreshLive();
 }
 
 void FffDock::toggleServer()
@@ -515,7 +535,7 @@ void FffDock::chooseCard(const QString &kind)
 	if (id.isEmpty() && kind != QLatin1String("cover"))
 		return;
 
-	const QString title = kind == QLatin1String("cover")       ? QStringLiteral("เลือก Cover PNG — แนะนำ 1920×1080")
+	const QString title = kind == QLatin1String("cover")       ? QStringLiteral("เลือก Cover PNG · แนะนำ 1920×1080")
 			      : kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
 			      : kind == QLatin1String("logo")      ? QStringLiteral("เลือกโลโก้กลาง PNG")
 								   : QStringLiteral("เลือก SCOREBOARD PNG");
@@ -525,7 +545,7 @@ void FffDock::chooseCard(const QString &kind)
 
 	const QString stored = m_session->importAsset(file, id, kind);
 	if (stored.isEmpty()) {
-		m_saveError->setText(QStringLiteral("นำเข้า PNG ไม่สำเร็จ — รูปเดิมยังอยู่"));
+		m_saveError->setText(QStringLiteral("นำเข้า PNG ไม่สำเร็จ รูปเดิมยังอยู่"));
 		return;
 	}
 
@@ -554,7 +574,7 @@ void FffDock::chooseCard(const QString &kind)
 
 void FffDock::showSaveError()
 {
-	m_saveError->setText(QStringLiteral("บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว กรุณาตรวจสอบพื้นที่และสิทธิ์เขียนไฟล์"));
+	m_saveError->setText(QStringLiteral("บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว กรุณาตรวจสอบพื้นที่และสิทธิ์เขียนไฟล์"));
 }
 
 void FffDock::regeneratePin()

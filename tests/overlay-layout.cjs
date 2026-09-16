@@ -243,22 +243,19 @@ async function main() {
     assert.equal(await monitor.$eval('#canvas', el => getComputedStyle(el).backgroundImage), 'none');
     await monitor.click('#showGrid');
     await monitor.select("#selection", "card:0");
-    await monitor.$eval("#scaleX", (el) => {
-      el.value = "150"; el.dispatchEvent(new Event("input"));
-    });
-    await monitor.$eval("#scaleY", (el) => {
-      el.value = "75"; el.dispatchEvent(new Event("input"));
-    });
+    for (const [id, value] of [["pieceWidth", "150"], ["pieceHeight", "75"]])
+      await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
     state.voted = 2;
     push();
     await monitor.waitForFunction(() => lastState.voted === 2);
-    assert.equal(await monitor.$eval("#scaleX", (el) => el.value), "150");
-    assert.equal(await monitor.$eval("#scaleY", (el) => el.value), "75");
-    await monitor.$eval("#scaleX", (el) => el.dispatchEvent(new Event("change")));
-    await monitor.$eval("#scaleY", (el) => el.dispatchEvent(new Event("change")));
+    assert.equal(await monitor.$eval("#pieceWidth", (el) => el.value), "150", "a vote does not reset a pending edit");
+    assert.equal(await monitor.$eval("#pieceHeight", (el) => el.value), "75");
     await settled();
-    assert.equal(state.pieces['card:0'].resultScaleX, 1.5);
-    assert.equal(state.pieces['card:0'].resultScaleY, 0.75);
+    assert.equal(state.pieces['card:0'].scaleX, 1.5);
+    assert.equal(state.pieces['card:0'].scaleY, 0.75);
+    await monitor.$eval("#pieceWidth", (el) => { el.value = "100"; el.dispatchEvent(new Event("change")); });
+    await monitor.$eval("#pieceHeight", (el) => { el.value = "100"; el.dispatchEvent(new Event("change")); });
+    await settled();
     await monitor.click("#centerX");
     await settled();
     assert.equal(state.pieces['card:0'].x, 0.5);
@@ -283,37 +280,13 @@ async function main() {
       "operator override replaces the phone's confirmed colour");
     assert.equal(await monitor.$eval('[data-target="card:0"] .result', (el) => getComputedStyle(el).display), "block");
     assert.equal(await overlay.$eval('[data-target="card:0"] .result', (el) => getComputedStyle(el).display), "block");
-    const imageBeforeResultScale = await geometry(monitor, "card:0");
-    const dimensions = page => page.$eval('[data-target="card:0"] .slot', el => {
-      const img = el.querySelector('.card-image').getBoundingClientRect();
-      const result = el.querySelector('.result').getBoundingClientRect();
-      return { imageWidth: img.width, imageHeight: img.height,
-        resultWidth: result.width, resultHeight: result.height };
-    });
-    const beforeResize = await dimensions(monitor);
-    await monitor.$eval("#scaleX", (el) => { el.value = "50"; el.dispatchEvent(new Event("input")); });
-    await monitor.$eval("#scaleY", (el) => { el.value = "200"; el.dispatchEvent(new Event("input")); });
-    await monitor.$eval("#scaleX", (el) => el.dispatchEvent(new Event("change")));
-    await monitor.$eval("#scaleY", (el) => el.dispatchEvent(new Event("change")));
-    await settled();
-    assert.equal(state.pieces["card:0"].resultScaleX, 0.5);
-    assert.equal(state.pieces["card:0"].resultScaleY, 2);
-    const afterResize = await dimensions(monitor);
-    assert.equal(afterResize.imageWidth, beforeResize.imageWidth);
-    assert.equal(afterResize.imageHeight, beforeResize.imageHeight);
-    assert.ok(Math.abs(afterResize.resultWidth / beforeResize.resultWidth - 1 / 3) < 0.01);
-    assert.ok(Math.abs(afterResize.resultHeight / beforeResize.resultHeight - 2 / 0.75) < 0.01);
     for (const page of [monitor, overlay]) {
       await page.waitForFunction(() => getComputedStyle(document.querySelector('[data-target="card:0"] .slot')).backgroundColor === 'rgba(0, 0, 0, 0)', { polling: 50 });
       assert.equal(await page.$eval('[data-target="card:0"] .slot', el => getComputedStyle(el).backgroundColor),
-        'rgba(0, 0, 0, 0)', 'no full-card colour behind the resized result');
+        'rgba(0, 0, 0, 0)', 'no full-card colour behind the result');
       assert.equal(await page.$eval('[data-target="card:0"] .card-image', el => getComputedStyle(el).zIndex), '1');
       assert.equal(await page.$eval('[data-target="card:0"] .result', el => getComputedStyle(el).zIndex), '0');
     }
-    close(await geometry(monitor, "card:0"), imageBeforeResultScale, "result scale leaves PNG card size unchanged");
-    assert.equal(await overlay.$eval('[data-target="card:0"] .result', (el) => getComputedStyle(el).transform),
-      await monitor.$eval('[data-target="card:0"] .result', (el) => getComputedStyle(el).transform),
-      "result scale reaches the overlay");
     await monitor.click('[data-layer="front"]');
     await monitor.waitForFunction(() => Object.keys(lastState.layers).length === lastState.presidents.length + 1, { timeout: 5000 });
     const topLayer = Math.max(...Object.values(state.layers));
@@ -333,7 +306,7 @@ async function main() {
     await monitor.keyboard.up("Shift");
     await settled();
     assert.ok(Math.abs((await geometry(monitor, "card:0")).y - pinned.y - 10) < 0.1);
-    console.log("PASS: independent width/height, full-card operator vote, SSE-safe controls and keyboard controls");
+    console.log("PASS: piece width/height, full-card operator vote, SSE-safe controls and keyboard controls");
 
     const beforeTemplate = await geometry(monitor, "card:0");
     await monitor.click('[data-layer="result"]');
@@ -361,6 +334,26 @@ async function main() {
     for (const page of [monitor, overlay]) {
       assert.equal(await page.$$eval('#board .result', els => els.every(el => el.style.width === "220px" && el.style.zIndex === "1")), true);
     }
+    // Sizing the flag backdrop is the template's job now. Both layers are boxed
+    // explicitly, so the invariant worth holding is that touching the result
+    // layer alone never moves the artwork it sits behind.
+    const slotBoxes = () => monitor.$eval('[data-target="card:0"] .slot', el => {
+      const box = node => { const r = node.getBoundingClientRect(); return { width: r.width, height: r.height }; };
+      return { image: box(el.querySelector('.card-image')), result: box(el.querySelector('.result')) };
+    });
+    const templated = await slotBoxes();
+    await monitor.$eval("#templateHeight", el => { el.value = 60; el.dispatchEvent(new Event("change")); });
+    await monitor.click("#templateApply");
+    await monitor.waitForFunction(() => lastState.cardTemplate?.result?.height === 60);
+    const resized = await slotBoxes();
+    assert.deepEqual(resized.image, templated.image, "resizing the result leaves the PNG alone");
+    // The canvas is zoomed, so compare the ratio rather than raw client pixels.
+    assert.ok(Math.abs(resized.result.height / templated.result.height - 0.6) < 0.01,
+      "the result box followed the template");
+    assert.equal(await monitor.$eval('[data-target="card:0"] .result', el => el.style.height), "60px");
+    await monitor.$eval("#templateHeight", el => { el.value = 100; el.dispatchEvent(new Event("change")); });
+    await monitor.click("#templateApply");
+    await monitor.waitForFunction(() => lastState.cardTemplate?.result?.height === 100);
     await monitor.$eval("#templateX", el => { el.value = 99; el.dispatchEvent(new Event("change")); });
     await monitor.click("#templateCancel");
     assert.equal(await monitor.$eval("#templateX", el => el.value), "35");

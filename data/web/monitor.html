@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FFF Flag Board — Monitor</title>
+<title>FFF Flag Board · Monitor</title>
 <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="monitor">
 
 <div class="bar">
   <div class="bar-title">จอมอนิเตอร์</div>
-  <div id="status" class="bar-status"></div>
-  <div id="warn" class="bar-warn hidden">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
+  <div id="status" class="bar-status" role="status"></div>
+  <div id="warn" class="bar-warn hidden" role="alert">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
 </div>
 
 <div class="monitor-workspace"><section class="board-panel">
@@ -31,31 +31,43 @@
 </div>
 
 <div class="controls">
-  <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">SCOREBOARD</option><option value="bottomBar">BOTTOM BAR</option></select></label>
-  <label>เลือก <select id="selection"></select></label>
-  <label><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
-  <span class="grid-tools"><label>คอลัมน์ <input id="gridColumns" type="number" min="1" max="3" value="3" /></label><label>ห่าง X <input id="gridGapX" type="number" min="0" max="300" value="34" /></label><label>ห่าง Y <input id="gridGapY" type="number" min="0" max="300" value="28" /></label><button id="gridPreview">ดูตัวอย่างตาราง</button><button id="gridApply" disabled>ใช้ตาราง</button><button id="gridCancel" disabled>ยกเลิกตาราง</button></span>
-  <button id="centerX">กึ่งกลางแนวนอน</button>
-  <button id="centerY">กึ่งกลางแนวตั้ง</button>
-  <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
-  <button id="resetAll">รีเซ็ตทั้งหมด</button>
-  <label hidden><span id="scaleXLabel">กว้าง</span> <input id="scaleX" type="range" min="50" max="200" step="1" /></label>
-  <span id="scaleXValue" hidden></span>
-  <label hidden><span id="scaleYLabel">สูง</span> <input id="scaleY" type="range" min="50" max="200" step="1" /></label>
-  <span id="scaleYValue" hidden></span>
-  <span class="opacity-controls">
+  <div class="control-group" role="group" aria-label="โหมดและชิ้นงาน">
+    <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">SCOREBOARD</option><option value="bottomBar">BOTTOM BAR</option></select></label>
+    <label>เลือก <select id="selection"></select></label>
+  </div>
+  <div class="control-group" role="group" aria-label="ตำแหน่ง">
+    <button id="centerX">กึ่งกลางแนวนอน</button>
+    <button id="centerY">กึ่งกลางแนวตั้ง</button>
+    <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
+    <button id="resetAll">รีเซ็ตทั้งหมด</button>
+  </div>
+  <div class="control-group opacity-controls" role="group" aria-label="ขนาดและความทึบ">
     <label>PNG % <input id="imageOpacity" type="number" min="0" max="100" value="100" /></label>
     <label>สีธง % <input id="resultOpacity" type="number" min="0" max="100" value="100" /></label>
     <label>ชิ้นงานกว้าง % <input id="pieceWidth" type="number" min="50" max="200" value="100" /></label>
     <label>ชิ้นงานสูง % <input id="pieceHeight" type="number" min="50" max="200" value="100" /></label>
-  </span>
-  <span class="layer-controls">Layer
+  </div>
+  <div class="control-group layer-controls" role="group" aria-label="ลำดับชั้น">
+    <span class="group-label">Layer</span>
     <button data-layer="front">หน้าสุด</button>
     <button data-layer="forward">ขึ้น</button>
     <button data-layer="backward">ลง</button>
     <button data-layer="back">หลังสุด</button>
-  </span>
-  <span id="symmetry" class="symmetry"></span>
+  </div>
+  <div class="control-group" role="group" aria-label="ตาราง">
+    <label><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
+    <!-- Arranging the card grid is a SCOREBOARD job; the gridline toggle above
+         stays available in both modes. -->
+    <span class="grid-tools">
+      <label>คอลัมน์ <input id="gridColumns" type="number" min="1" max="3" value="3" /></label>
+      <label>ห่าง X <input id="gridGapX" type="number" min="0" max="300" value="34" /></label>
+      <label>ห่าง Y <input id="gridGapY" type="number" min="0" max="300" value="28" /></label>
+      <button id="gridPreview" aria-pressed="false">ดูตัวอย่างตาราง</button>
+      <button id="gridApply" disabled>ใช้ตาราง</button>
+      <button id="gridCancel" disabled>ยกเลิกตาราง</button>
+    </span>
+  </div>
+  <output id="symmetry" class="symmetry"></output>
 </div>
 <div id="cardControls" class="piece-options" hidden>
   <span class="flag-controls">กำหนดธง
@@ -71,8 +83,8 @@
   <h2>แม่แบบทุกการ์ด</h2>
   <p>แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
   <div class="template-toolbar">
-    <button id="templateZoomOut">−</button><output id="templateZoomValue"></output>
-    <button id="templateZoomIn">+</button><button id="templateFit">พอดีจอ</button>
+    <button id="templateZoomOut" aria-label="ซูมออก">−</button><output id="templateZoomValue"></output>
+    <button id="templateZoomIn" aria-label="ซูมเข้า">+</button><button id="templateFit">พอดีจอ</button>
     <label>ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
   </div>
   <div id="templateViewport"><div id="templateStage">
@@ -107,12 +119,6 @@ const wrap = document.getElementById("wrap");
 const board = document.getElementById("board");
 const statusEl = document.getElementById("status");
 const warn = document.getElementById("warn");
-const scaleXInput = document.getElementById("scaleX");
-const scaleYInput = document.getElementById("scaleY");
-const scaleXLabel = document.getElementById("scaleXLabel");
-const scaleYLabel = document.getElementById("scaleYLabel");
-const scaleXValue = document.getElementById("scaleXValue");
-const scaleYValue = document.getElementById("scaleYValue");
 const symmetry = document.getElementById("symmetry");
 const selection = document.getElementById("selection");
 const saveStatus = document.getElementById("saveStatus");
@@ -169,27 +175,27 @@ function apply() {
   for (const [key, piece] of pieces)
     piece.element.classList.toggle("selected", key === selected);
   const piece = pieces.get(selected);
-  for (const id of ["centerX", "centerY", "reset", "scaleX", "scaleY"])
+  for (const id of ["centerX", "centerY", "reset"])
     document.getElementById(id).disabled = !piece;
   for (const button of document.querySelectorAll("[data-layer]"))
     button.disabled = !piece;
   cardControls.hidden = !piece;
+  // A vote button is a choice, not a fire-and-forget action: say which colour
+  // the selected card is actually on.
+  const vote = selected.startsWith("card:") &&
+    (lastState.presidents.find(p => "card:" + p.id === selected) || {}).vote;
+  for (const button of document.querySelectorAll("[data-vote]"))
+    button.setAttribute("aria-pressed", String(button.dataset.vote === (vote || "none")));
   templateEditor.update(lastState, selected);
-  if (!piece) { symmetry.textContent = ""; scaleXValue.textContent = ""; scaleYValue.textContent = ""; return; }
+  if (!piece) { symmetry.textContent = ""; return; }
   const layout = piece.layout;
   for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", (!selected.startsWith("card:") ? 1 : lastState.cardTemplate?.image?.opacity) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
     document.getElementById(id).value = Math.round((layout[key] ?? fallback) * 100);
-  document.getElementById("resultOpacity").disabled = !selected.startsWith("card:");
   const isCard = selected.startsWith("card:");
-  const scaleX = isCard ? layout.resultScaleX : layout.scaleX;
-  const scaleY = isCard ? layout.resultScaleY : layout.scaleY;
-  scaleXLabel.textContent = isCard ? "พื้นผลธง กว้าง" : "กว้าง";
-  scaleYLabel.textContent = isCard ? "พื้นผลธง สูง" : "สูง";
-  scaleXInput.value = Math.round(scaleX * 100);
-  scaleYInput.value = Math.round(scaleY * 100);
-  scaleXValue.textContent = Math.round(scaleX * 100) + "%";
-  scaleYValue.textContent = Math.round(scaleY * 100) + "%";
-  const width = piece.element.offsetWidth * layout.scaleX * (isCard ? scaleX : 1);
+  document.getElementById("resultOpacity").disabled = !isCard;
+  // The flag-colour backdrop is sized in the template editor, so the symmetry
+  // readout follows the template's result box for cards.
+  const width = piece.element.offsetWidth * layout.scaleX * (isCard ? layout.resultScaleX : 1);
   const left = Math.round(layout.x * CANVAS_W - width / 2);
   const right = Math.round(CANVAS_W - (layout.x * CANVAS_W + width / 2));
   const balanced = Math.abs(left - right) <= 2;
@@ -242,7 +248,7 @@ async function flush() {
     apply();
   } catch (err) {
     if (pending.get(key) === request) pending.delete(key);
-    saveStatus.textContent = "บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว";
+    saveStatus.textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว";
     apply();
   } finally {
     clearTimeout(timeout);
@@ -368,17 +374,23 @@ function buildGridDraft() {
       y: (startY + row * (height + gapY) + height / 2) / CANVAS_H, scale: 1, scaleX: 1, scaleY: 1 }];
   }));
 }
+// One place decides how the three grid buttons read, so the preview button's
+// pressed state can never drift from whether a preview is actually live.
+function showGridPreview(live) {
+  const previewing = !!(live && live.size);
+  document.getElementById("gridPreview").setAttribute("aria-pressed", String(previewing));
+  document.getElementById("gridApply").disabled = !previewing;
+  document.getElementById("gridCancel").disabled = !previewing;
+}
 document.getElementById("gridPreview").onclick = () => {
   gridDrafts = buildGridDraft();
-  document.getElementById("gridApply").disabled = !gridDrafts.size;
-  document.getElementById("gridCancel").disabled = !gridDrafts.size;
-  saveStatus.textContent = "กำลังดูตัวอย่างตาราง — กดใช้ตารางเพื่อบันทึก";
+  showGridPreview(gridDrafts);
+  saveStatus.textContent = "กำลังดูตัวอย่างตาราง กดใช้ตารางเพื่อบันทึก";
   apply();
 };
 document.getElementById("gridCancel").onclick = () => {
   gridDrafts = null;
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  showGridPreview(null);
   saveStatus.textContent = "ยกเลิกตัวอย่างตารางแล้ว";
   apply();
 };
@@ -386,8 +398,7 @@ document.getElementById("gridApply").onclick = () => {
   if (!gridDrafts) return;
   for (const [target, layout] of gridDrafts) queue({ target, layout });
   gridDrafts = null;
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  showGridPreview(null);
   saveStatus.textContent = "กำลังบันทึกตาราง…";
   apply();
 };
@@ -425,20 +436,6 @@ document.getElementById("resetAll").onclick = () => {
   for (const [key, request] of pending) if (request.mode === editMode) pending.delete(key);
   queue({ target: "all", reset: true });
 };
-scaleXInput.oninput = () => {
-  if (startDraft()) {
-    draft.layout[selected.startsWith("card:") ? "resultScaleX" : "scaleX"] = scaleXInput.value / 100;
-    apply();
-  }
-};
-scaleXInput.onchange = commitDraft;
-scaleYInput.oninput = () => {
-  if (startDraft()) {
-    draft.layout[selected.startsWith("card:") ? "resultScaleY" : "scaleY"] = scaleYInput.value / 100;
-    apply();
-  }
-};
-scaleYInput.onchange = commitDraft;
 
 for (const button of document.querySelectorAll("[data-vote]")) {
   button.onclick = async () => {
@@ -452,7 +449,7 @@ for (const button of document.querySelectorAll("[data-vote]")) {
       if (!res.ok) throw new Error("vote failed");
       saveStatus.textContent = "ตั้งค่าสีธงแล้ว";
     } catch (err) {
-      saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ — ลองใหม่อีกครั้ง";
+      saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
       button.disabled = false;
     }
@@ -471,7 +468,7 @@ for (const button of document.querySelectorAll("[data-layer]")) {
       if (!res.ok) throw new Error("layer failed");
       saveStatus.textContent = "บันทึกลำดับ layer แล้ว";
     } catch (err) {
-      saveStatus.textContent = "บันทึกลำดับ layer ไม่ได้ — ลองใหม่อีกครั้ง";
+      saveStatus.textContent = "บันทึกลำดับ layer ไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
       button.disabled = false;
     }
@@ -496,7 +493,7 @@ function render(incoming) {
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
 
-  const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " — " + p.school]);
+  const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " · " + p.school]);
   if (editMode === "bottomBar") choices.push(["logo", "โลโก้กลาง"], ["cover", "Cover PNG"]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
@@ -521,8 +518,7 @@ document.getElementById("editMode").onchange = event => {
   endDrag(); commitDraft(); gridDrafts = null;
   editMode = event.target.value; selected = "";
   document.querySelector(".grid-tools").hidden = editMode === "bottomBar";
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  showGridPreview(null);
   if (sourceState) render(sourceState);
 };
 for (const [id, key] of [["imageOpacity", "imageOpacity"], ["resultOpacity", "resultOpacity"], ["pieceWidth", "scaleX"], ["pieceHeight", "scaleY"]]) {

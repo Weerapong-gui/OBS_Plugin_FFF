@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
 <meta charset="utf-8" />
-<title>FFF Flag Board — Overlay</title>
+<title>FFF Flag Board · Overlay</title>
 <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="overlay">
@@ -21,11 +21,49 @@ let displayedMode = null;
 let displayedRound = null;
 let transition = null;
 let motionGeneration = 0;
+let preparedKey = null;
+let relayout = 0;
 
 const BOTTOM_TIMING = Object.freeze({
   logo: 180, cover: 300, card: 450, firstPair: 80, pair: 45,
   maxStagger: 420, exit: 240, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 });
+
+// The operator's press must never be the first time the browser hears about a
+// PNG. Every asset in the feed is fetched the moment the state arrives, and the
+// mode that is about to go on air is decoded as well, so the reveal frame has
+// no network and no decode left to do.
+const warmed = new Map();
+function warmAssets(state) {
+  const bottom = (state.displayMode || "scoreboard") === "bottomBar";
+  const logoId = state.bottomBar && state.bottomBar.logoPresidentId;
+  const wanted = new Map();
+  const want = (url, eager) => { if (url) wanted.set(url, wanted.get(url) || eager); };
+  for (const president of state.presidents || []) {
+    want(president.cardUrl, !bottom);
+    want(president.bottomBarUrl, bottom);
+    want(president.logoUrl, bottom && president.id === logoId);
+  }
+  want(state.bottomBar && state.bottomBar.coverUrl, bottom);
+
+  for (const [url, eager] of wanted) {
+    let image = warmed.get(url);
+    if (!image) {
+      image = new Image();
+      image.decoding = "async";
+      if (eager) image.fetchPriority = "high";
+      warmed.set(url, image);
+      image.src = url;
+    }
+    // Decoding costs memory, so only the mode on deck pays for it; the other
+    // mode still opens without a round trip because the bytes are cached.
+    if (eager && !image._decoding) {
+      image._decoding = true;
+      image.decode().catch(() => { image._decoding = false; });
+    }
+  }
+  for (const url of [...warmed.keys()]) if (!wanted.has(url)) warmed.delete(url);
+}
 
 // Measure in the presentation's local coordinates, including template overflow
 // and independently scaled results. Saved transforms stay on the outer piece.
@@ -33,7 +71,8 @@ function revealBounds(element) {
   const origin = element.getBoundingClientRect();
   const scaleX = origin.width / element.offsetWidth || 1;
   const scaleY = origin.height / element.offsetHeight || 1;
-  const bounds = { left: 0, top: 0, right: element.offsetWidth, bottom: element.offsetHeight };
+  const bounds = { left: 0, top: 0, right: element.offsetWidth, bottom: element.offsetHeight,
+    width: element.offsetWidth, height: element.offsetHeight };
   for (const child of element.querySelectorAll(".card-image, .result")) {
     if (child.hidden || getComputedStyle(child).display === "none") continue;
     const box = child.getBoundingClientRect();
@@ -43,6 +82,18 @@ function revealBounds(element) {
     bounds.bottom = Math.max(bounds.bottom, (box.bottom - origin.top) / scaleY);
   }
   return bounds;
+}
+
+// Reveal extents are measured for every animating card at once and only written
+// back where they moved: re-keyframing an animation drops it off the compositor,
+// and votes keep arriving while the entrance is still running.
+function refreshReveals() {
+  const elements = [];
+  for (const element of board.querySelectorAll(".bottom-motion"))
+    if (element._measureReveal) elements.push(element);
+  if (!elements.length) return;
+  const measures = elements.map(element => element._measureReveal());
+  elements.forEach((element, index) => element._applyReveal(measures[index]));
 }
 
 function animateBottom(entering, done = () => {}) {
@@ -85,7 +136,9 @@ function animateBottom(entering, done = () => {}) {
       for (const animation of motions) animation.cancel();
       wipe?.remove();
       element.classList.remove("is-animating");
-      element._refreshReveal = null;
+      element._measureReveal = null;
+      element._applyReveal = null;
+      element._revealKey = null;
       element._cancelPresentation = null;
     };
     element._cancelPresentation = cleanup;
@@ -95,23 +148,31 @@ function animateBottom(entering, done = () => {}) {
       wipe.setAttribute("aria-hidden", "true"); element.appendChild(wipe);
       const motion = element.animate([], options), sweep = wipe.animate([], options);
       motions.push(motion, sweep);
-      element._refreshReveal = () => {
+      element._measureReveal = () => {
         const box = revealBounds(element);
-        const inset = top => `inset(${top}px ${element.offsetWidth - box.right}px ${element.offsetHeight - box.bottom}px ${box.left}px)`;
+        const result = element.querySelector(".result"), style = getComputedStyle(result);
+        return { box, hidden: style.display === "none",
+          color: style.backgroundColor, opacity: style.opacity };
+      };
+      element._applyReveal = (measure) => {
+        const box = measure.box;
+        const key = [box.left, box.top, box.right, box.bottom, box.width, box.height,
+          measure.hidden, measure.color, measure.opacity].join("|");
+        if (element._revealKey === key) return;
+        element._revealKey = key;
+        const inset = top => `inset(${top}px ${box.width - box.right}px ${box.height - box.bottom}px ${box.left}px)`;
         motion.effect.setKeyframes([
           { opacity: 0, transform: "translateY(18px)", clipPath: inset(box.bottom) },
           { opacity: 1, transform: "translateY(0px)", clipPath: inset(box.top) }
         ]);
-        const result = element.querySelector(".result"), style = getComputedStyle(result);
-        wipe.hidden = style.display === "none";
+        wipe.hidden = measure.hidden;
         Object.assign(wipe.style, { left: box.left + "px", width: (box.right - box.left) + "px",
-          backgroundColor: style.backgroundColor, opacity: style.opacity });
+          backgroundColor: measure.color, opacity: measure.opacity });
         sweep.effect.setKeyframes([
           { transform: `translateY(${box.bottom}px)` },
           { transform: `translateY(${box.top}px)` }
         ]);
       };
-      element._refreshReveal();
     } else {
       const start = entering ? { opacity: 0, transform: cover ? "none" : "translateY(12px)" } :
         { opacity: current[index].opacity, transform: current[index].transform, clipPath: current[index].clipPath };
@@ -127,13 +188,37 @@ function animateBottom(entering, done = () => {}) {
     // Each piece owns its cleanup. Removing one card cannot settle the others.
     Promise.all(motions.map(animation => animation.finished.catch(() => {}))).then(cleanup);
   }
+  // Still the same task as the empty keyframes above, so nothing paints between.
+  refreshReveals();
   Promise.all(active.motions.map(animation => animation.finished.catch(() => {}))).then(finish);
   // Use the actual delayed end, with the same generation-guarded completion.
   active.timer = setTimeout(finish, deadline);
 }
 
+// Geometry only has to be recomputed when something that can move a piece
+// changed. A vote changes colours, not boxes.
+function layoutKey(view, mode) {
+  return JSON.stringify([mode, view.layout, view.pieces, view.layers, view.cardTemplate, view.coverUrl,
+    (view.presidents || []).map(p => [p.id, p.cardUrl, p.bottomBarUrl, p.logoUrl])]);
+}
+
+// Everything expensive happens here, and it runs while the board is still
+// blank: the DOM exists, the PNGs are attached and decoded, and the saved
+// geometry is already measured before the operator presses anything.
+function prepare(state, mode, justRevealed) {
+  const view = modeState(state, mode);
+  renderBoard(board, view, { revealed: true, showVotes: true, justRevealed });
+  const key = layoutKey(view, mode);
+  if (key !== preparedKey) {
+    preparedKey = key;
+    applyPieceLayouts(wrap, view);
+  }
+  refreshReveals();
+}
+
 function render(state) {
   lastState = state;
+  warmAssets(state);
   const revealed = state.phase === "revealed";
   const mode = state.displayMode || "scoreboard";
   // Freeze the outgoing round. Every incoming command updates lastState, and
@@ -151,22 +236,30 @@ function render(state) {
 
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
+  const enteringBottom = revealed && mode === "bottomBar" && displayedMode !== "bottomBar";
+  prepare(state, mode, justRevealed);
   if (!revealed) {
     wrap.hidden = true; displayedMode = null;
     return;
   }
-  const enteringBottom = mode === "bottomBar" && displayedMode !== "bottomBar";
   wrap.hidden = false;
   displayedMode = mode; displayedRound = state.round;
-  const view = modeState(state, mode);
-  renderBoard(board, view, { revealed: true, showVotes: true, justRevealed });
-  applyPieceLayouts(wrap, view);
   if (enteringBottom) animateBottom(true);
 }
 
+// A card PNG that still lands late resizes its slot, so the measured geometry
+// has to be taken again once — coalesced, not once per image.
+board.addEventListener("load", () => {
+  if (relayout) return;
+  relayout = requestAnimationFrame(() => {
+    relayout = 0;
+    preparedKey = null;
+    if (lastState) render(lastState);
+  });
+}, true);
+
 const stream = new EventSource("/api/events/overlay");
-stream.onmessage = (event) => { lastState = JSON.parse(event.data); render(lastState); };
-document.fonts.ready.then(() => { if (lastState) render(lastState); });
+stream.onmessage = (event) => { render(JSON.parse(event.data)); };
 </script>
 </body>
 </html>

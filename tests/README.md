@@ -16,7 +16,7 @@ ctest --test-dir /private/tmp/fff-layout-native --output-on-failure
 ```
 
 Browser checks serve the actual web files with a fixture HTTP/SSE server. They
-exercise real pointer events, monitor/overlay geometry, independent scaling,
+exercise real pointer events, monitor/overlay geometry, piece width/height,
 votes during editing, failed saves/retries, keyboard controls and roster changes.
 Use an installed Chromium browser; the default executable is Brave on macOS.
 Dependencies go into a temporary directory, not the plugin project:
@@ -63,11 +63,14 @@ and `resultOpacity` range from 0 to 1; omitted values inherit template opacity,
 then 1. Template `image.opacity` and `result.opacity` apply to all inheriting slots.
 `POST /api/display` with `{"mode":"bottomBar"}` reveals that mode without clearing
 votes; `POST /api/logo` with `{"presidentId":"id"}` selects only the central logo
-(use an empty ID to clear). Both are localhost-only.
+(use an empty ID to clear). Both are localhost-only. The dock's mode buttons are
+toggles: pressing the mode that is on air calls `FffSession::hideDisplay()`, which
+returns the phase to collecting while leaving votes, round and the remembered
+display mode untouched, so the same round can go straight back up.
 
 Extended native/browser checks cover mode isolation, old session defaults,
-0/1/14/odd rosters, logo deletion, live votes, Clear, opacity, image replacement,
-geometry parity, and persistence rollback. Browser screenshots use fixture PNGs;
+0/1/14/odd rosters, logo deletion, live votes, Clear, hide and restore, opacity,
+image replacement, geometry parity, and persistence rollback. Browser screenshots use fixture PNGs;
 actual school artwork and loading the built plugin in OBS remain manual checks.
 
 ### Bottom Bar presentation regression

@@ -7,6 +7,11 @@
   --text: #f4f6f8;
   --muted: #9aa4b0;
   --accent: #4d9dff;
+  --amber: #ffb02e;
+  /* --edge stays for decorative hairlines; interactive controls need a boundary
+     that clears 3:1 against the panels they sit on. */
+  --border: #3a4452;
+  --ring: #4d9dff;
   font-family: "Noto Sans Thai", "IBM Plex Sans Thai", Thonburi, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -16,9 +21,9 @@
 .template-panel h2 { margin: 0; font-size: 20px; }
 .template-panel p { color: var(--muted); font-size: 13px; }
 .template-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
-.template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
+.template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 .template-panel button { cursor: pointer; }
-.template-panel button:disabled { opacity: 0.45; cursor: default; }
+.template-panel button:disabled { opacity: 0.55; cursor: default; }
 #templateViewport { height: 340px; overflow: auto; position: relative; touch-action: none; background-color: #252a32;
   background-image: conic-gradient(#343a43 25%, transparent 0 50%, #343a43 0 75%, transparent 0);
   background-size: 20px 20px; }
@@ -59,7 +64,7 @@ body.phone {
 
 .phone .session-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .phone .session-top [role="status"] { color:var(--green); font-weight:700; }
-.phone .session-top [role="status"].offline { color:#ffb02e; }
+.phone .session-top [role="status"].offline { color:var(--amber); }
 .phone .secondary { border:1px solid var(--edge); border-radius:10px; padding:11px 14px; background:#252e3a; color:var(--text); font-weight:700; }
 .phone .eyebrow { color:var(--accent); font-size:12px; letter-spacing:1.5px; margin:0 0 8px; }
 .phone .login-hint { color:var(--muted); margin:6px 0 16px; }
@@ -164,7 +169,7 @@ body.phone {
 }
 
 .status.offline {
-  color: #ffb02e;
+  color: var(--amber);
 }
 
 /* ---------- the board itself (overlay + monitor) ---------- */
@@ -313,6 +318,15 @@ body.overlay {
   overflow: hidden;
 }
 
+/* The overlay builds and measures its board while the stream is still clean, so
+   a blank board keeps its layout instead of being torn out of the box tree. A
+   visibility:hidden subtree paints nothing, so the source stays transparent and
+   the reveal only has to flip this back. */
+.overlay .board-wrap[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
 /* ---------- monitor ---------- */
 
 body.monitor {
@@ -432,25 +446,64 @@ body.monitor {
 
 .controls {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
 }
 
+/* Twenty-odd controls in one flat row read as noise. Grouping them by the job
+   they do gives the operator somewhere to aim. */
+.control-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+}
+
+.control-group .group-label {
+  color: var(--muted);
+}
+
 .controls button, .controls select {
+  min-height: 32px;
   padding: 8px 14px;
   border-radius: 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--border);
   background: #1a212b;
   color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
+
+.controls button:hover:enabled, .controls select:hover:enabled {
+  border-color: var(--ring);
+}
+
 .grid-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .grid-tools label { color: var(--muted); }
 .grid-tools input { width: 55px; padding: 6px; }
 
 .controls input[type="range"] {
   accent-color: var(--accent);
+}
+
+/* Every control on this page is reachable by keyboard, so every control has to
+   show where the keyboard is. */
+.monitor :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Selected state as a ring rather than a fill, so it reads the same on the
+   neutral grid button and on the green and red flag buttons. */
+.monitor .controls [aria-pressed="true"],
+.monitor .flag-controls [aria-pressed="true"] {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--text);
 }
 
 .piece-options {
@@ -484,7 +537,7 @@ body.monitor {
 .layer-controls button {
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--border);
   background: #1a212b;
   color: var(--text);
 }
@@ -493,8 +546,9 @@ body.monitor {
 .flag-controls .flag-green { background: var(--green); }
 .flag-controls .flag-red { background: var(--red); }
 
-.controls button:disabled, .controls input:disabled {
-  opacity: 0.45;
+.controls button:disabled, .controls select:disabled, .controls input:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .controls label {
