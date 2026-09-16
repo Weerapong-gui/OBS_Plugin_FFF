@@ -28,11 +28,14 @@
       <div id="board" class="board"></div>
     </div>
   </div>
+  <div id="canvasZoom" class="zoom-bar" role="group" aria-label="มุมมอง">
+    <button id="canvasZoomOut" aria-label="ซูมออก">−</button><output id="canvasZoomValue"></output><button id="canvasZoomIn" aria-label="ซูมเข้า">+</button><button id="canvasZoomActual">1:1</button><button id="canvasZoomFit">พอดีจอ</button>
+  </div>
 </div>
 
 <div class="controls">
   <div class="control-group" role="group" aria-label="โหมดและชิ้นงาน">
-    <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">SCOREBOARD</option><option value="bottomBar">BOTTOM BAR</option></select></label>
+    <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">Show Status</option><option value="bottomBar">BOTTOM BAR</option></select></label>
     <label>เลือก <select id="selection"></select></label>
   </div>
   <div class="control-group" role="group" aria-label="ตำแหน่ง">
@@ -75,26 +78,49 @@
     <button class="flag-green" data-vote="green">เขียว</button>
     <button class="flag-red" data-vote="red">แดง</button>
   </span>
+  <span id="statusControls" class="status-controls">สถานะ
+    <button class="status-qualified" data-status="qualified">QUALIFIED</button>
+    <button class="status-unqualified" data-status="unqualified">UNQUALIFIED</button>
+    <button class="status-waiting" data-status="waiting">WAITING</button>
+  </span>
+</div>
+<div id="statusAssets" class="status-assets" hidden>
+  <span class="group-label">PNG ต่อสถานะ</span>
+  <label>QUALIFIED <input type="file" accept="image/png" data-asset="qualified" /><button data-clear="qualified">ลบ</button></label>
+  <label>UNQUALIFIED <input type="file" accept="image/png" data-asset="unqualified" /><button data-clear="unqualified">ลบ</button></label>
+  <label>WAITING <input type="file" accept="image/png" data-asset="waiting" /><button data-clear="waiting">ลบ</button></label>
 </div>
 <p id="saveStatus" class="hint" role="status"></p>
 <p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ดูตัวอย่างตารางก่อนกดใช้ · ตารางช่องละ 60px</p>
 </section>
 <aside class="template-panel">
-  <h2>แม่แบบทุกการ์ด</h2>
-  <p>แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
+  <h2 id="templateTitle">แม่แบบทุกการ์ด</h2>
+  <p id="templateHint">แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
   <div class="template-toolbar">
     <button id="templateZoomOut" aria-label="ซูมออก">−</button><output id="templateZoomValue"></output>
-    <button id="templateZoomIn" aria-label="ซูมเข้า">+</button><button id="templateFit">พอดีจอ</button>
-    <label>ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
+    <button id="templateZoomIn" aria-label="ซูมเข้า">+</button><button id="templateZoomActual">1:1</button><button id="templateFit">พอดีจอ</button>
+    <label id="templateColorField">ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
   </div>
   <div id="templateViewport"><div id="templateStage">
-    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div></div>
+    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div><div id="templateCount" class="count-value" hidden></div></div>
     <div id="templatePlaceholder">PNG ของแต่ละการ์ด</div>
     <div id="templateSelection"><button id="templateResize" aria-label="ลากปรับขนาด"></button></div>
   </div></div>
   <p class="hint">ลากเพื่อย้าย · ลากมุมเพื่อปรับขนาด · Shift + ลากมุม เพื่อรักษาสัดส่วน · เลเยอร์บนสุดอยู่ด้านหน้า</p>
   <div id="templateLayers" role="group" aria-label="เลเยอร์แม่แบบ"></div>
-  <div class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div id="templateLayerTools" class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div id="templateFontFields" hidden>
+    <div class="template-fields">
+      <label>ฟอนต์ในเครื่อง <select id="templateFont"><option value="">ค่าเริ่มต้นของระบบ</option></select></label>
+      <label>พิมพ์ชื่อฟอนต์เอง <input id="templateFontManual" type="text" maxlength="120" placeholder="เช่น Bai Jamjuree" /></label>
+      <label>น้ำหนัก <select id="templateFontWeight"></select></label>
+      <label>ขนาดตัวอักษร px <input id="templateFontSize" type="number" min="24" max="400" step="1" value="96" /></label>
+      <label>สีตัวเลข <input id="templateColorValue" type="color" value="#e23c3c" /></label>
+    </div>
+    <div class="template-toolbar"><button id="templateFontPick">ค้นหาฟอนต์ในเครื่อง</button></div>
+    <p id="templateFontPreview" class="font-preview">0123456789</p>
+    <p id="templateFontNote" class="hint"></p>
+  </div>
   <div class="template-fields">
     <label>Opacity % <input id="templateOpacity" type="number" min="0" max="100" value="100" /></label>
     <label>X <input id="templateX" type="number" min="-2000" max="2000" step="1" /></label>
@@ -106,6 +132,7 @@
   <p id="templateStatus" role="status"></p>
 </aside></div>
 
+<script src="/view-zoom.js"></script>
 <script src="/board.js"></script>
 <script src="/template-editor.js"></script>
 <script>
@@ -142,12 +169,23 @@ const showGrid = document.getElementById("showGrid");
 showGrid.onchange = () => canvas.classList.toggle("show-grid", showGrid.checked);
 showGrid.onchange();
 
-function fitCanvas() {
-  const factor = frame.clientWidth / CANVAS_W;
-  canvas.style.transform = `scale(${factor})`;
-  return factor;
+// Zoom and pan are view state only: the transform lives on the canvas, never on
+// a piece, so nothing the operator saved moves when the preview does.
+const canvasView = createViewZoom({
+  frame: frame, content: canvas, width: CANVAS_W, height: CANVAS_H,
+  onChange: scale => { document.getElementById("canvasZoomValue").textContent = Math.round(scale * 100) + "%"; }
+});
+// Every measurement in canvas pixels reads the scale that is actually on screen
+// rather than assuming the preview is at fit.
+function canvasScale() {
+  return canvas.getBoundingClientRect().width / CANVAS_W || 1;
 }
-window.addEventListener("resize", () => { fitCanvas(); apply(); });
+function fitCanvas() { canvasView.fit(); return canvasScale(); }
+document.getElementById("canvasZoomIn").onclick = () => canvasView.zoomBy(1.25);
+document.getElementById("canvasZoomOut").onclick = () => canvasView.zoomBy(1 / 1.25);
+document.getElementById("canvasZoomActual").onclick = () => canvasView.actual();
+document.getElementById("canvasZoomFit").onclick = () => canvasView.fit();
+window.addEventListener("resize", () => { canvasView.refit(); apply(); });
 
 function projectedState() {
   const state = { ...lastState, pieces: { ...lastState.pieces }, layers: { ...lastState.layers } };
@@ -189,10 +227,22 @@ function apply() {
   templateEditor.update(lastState, selected);
   if (!piece) { symmetry.textContent = ""; return; }
   const layout = piece.layout;
-  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", (!selected.startsWith("card:") ? 1 : lastState.cardTemplate?.image?.opacity) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
+  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", templateOpacity(lastState, selected) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
     document.getElementById(id).value = Math.round((layout[key] ?? fallback) * 100);
   const isCard = selected.startsWith("card:");
   document.getElementById("resultOpacity").disabled = !isCard;
+  // Status drives the scoreboard and flags drive the bottom bar, but both belong
+  // to the same card, so a selected card offers both wherever it is being edited.
+  document.getElementById("statusControls").hidden = !isCard;
+  document.getElementById("statusAssets").hidden = !isCard;
+  const status = isCard &&
+    (lastState.presidents.find(p => "card:" + p.id === selected) || {}).status;
+  for (const button of document.querySelectorAll("[data-status]"))
+    button.setAttribute("aria-pressed", String(button.dataset.status === (status || "waiting")));
+  for (const input of document.querySelectorAll("[data-asset]")) {
+    const person = lastState.presidents.find(p => "card:" + p.id === selected) || {};
+    input.closest("label").classList.toggle("has-asset", !!person[input.dataset.asset + "Url"]);
+  }
   // The flag-colour backdrop is sized in the template editor, so the symmetry
   // readout follows the template's result box for cards.
   const width = piece.element.offsetWidth * layout.scaleX * (isCard ? layout.resultScaleX : 1);
@@ -298,7 +348,7 @@ function select(target) {
 selection.onchange = () => select(selection.value);
 
 canvas.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || dragging) return;
+  if (event.button !== 0 || dragging || canvasView.panning) return;
   // The full-canvas cover is selected from the list. Even when selected,
   // hit-test the cards underneath first so it cannot trap the operator.
   let piece = event.target.closest(".piece");
@@ -323,7 +373,7 @@ canvas.addEventListener("pointerdown", (event) => {
 canvas.addEventListener("pointermove", (event) => {
   if (!dragging || !draft) return;
   const layout = draft.layout;
-  const factor = frame.clientWidth / CANVAS_W;
+  const factor = canvasScale();
   layout.x = layoutStart.x + (event.clientX - dragStart.x) / factor / CANVAS_W;
   layout.y = layoutStart.y + (event.clientY - dragStart.y) / factor / CANVAS_H;
 
@@ -456,6 +506,50 @@ for (const button of document.querySelectorAll("[data-vote]")) {
   };
 }
 
+for (const button of document.querySelectorAll("[data-status]")) {
+  button.onclick = async () => {
+    if (!selected.startsWith("card:")) return;
+    button.disabled = true;
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ presidentId: selected.slice(5), status: button.dataset.status })
+      });
+      if (!res.ok) throw new Error("status failed");
+      saveStatus.textContent = "ตั้งสถานะแล้ว";
+    } catch (err) {
+      saveStatus.textContent = "ตั้งสถานะไม่ได้ ลองใหม่อีกครั้ง";
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+
+// The PNG goes up as raw bytes; an empty body clears that status's artwork.
+async function sendAsset(kind, body) {
+  if (!selected.startsWith("card:")) return;
+  saveStatus.textContent = "กำลังอัปโหลด…";
+  try {
+    const res = await fetch(`/api/asset?presidentId=${encodeURIComponent(selected.slice(5))}&kind=${kind}`,
+      { method: "POST", headers: { "Content-Type": "image/png" }, body });
+    if (!res.ok) throw new Error("upload failed");
+    saveStatus.textContent = body ? "อัปโหลดภาพแล้ว" : "ลบภาพแล้ว";
+  } catch (err) {
+    saveStatus.textContent = "อัปโหลดไม่สำเร็จ ต้องเป็น PNG เท่านั้น";
+  }
+}
+for (const input of document.querySelectorAll("[data-asset]")) {
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    await sendAsset(input.dataset.asset, await file.arrayBuffer());
+    input.value = "";
+  };
+}
+for (const button of document.querySelectorAll("[data-clear]")) {
+  button.onclick = () => sendAsset(button.dataset.clear, new ArrayBuffer(0));
+}
+
 for (const button of document.querySelectorAll("[data-layer]")) {
   button.onclick = async () => {
     if (!pieces.has(selected)) return;
@@ -487,14 +581,16 @@ function render(incoming) {
   lastPhase = state.phase;
 
   statusEl.textContent = revealed
-    ? "ขึ้นจอแล้ว · " + (incoming.displayMode === "bottomBar" ? "BOTTOM BAR" : "SCOREBOARD")
+    ? "ขึ้นจอแล้ว · " + (incoming.displayMode === "bottomBar" ? "BOTTOM BAR" : "Show Status")
     : `ส่งแล้ว ${state.voted}/${state.total} · ยังไม่ขึ้นจอ`;
 
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
 
   const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " · " + p.school]);
-  if (editMode === "bottomBar") choices.push(["logo", "โลโก้กลาง"], ["cover", "Cover PNG"]);
+  if (editMode === "bottomBar")
+    choices.push(["logo", "โลโก้กลาง"], ["count:red", "จำนวนธงแดง"],
+      ["count:green", "จำนวนธงเขียว"], ["cover", "Cover PNG"]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
     selection.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));

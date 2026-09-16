@@ -69,6 +69,10 @@ private:
 	void addPresident();
 	void removeSelected();
 	void chooseCard(const QString &kind);
+	void clearCard(const QString &kind);
+	// Choosing and clearing differ only in where the file name comes from, so
+	// both write through one place that knows which field a kind owns.
+	void applyAsset(const QString &kind, const QString &stored);
 	void showSaveError();
 	void regeneratePin();
 
@@ -166,7 +170,7 @@ void FffDock::buildUi()
 
 	m_table = new QTableWidget(0, 6, rosterBox);
 	m_table->setHorizontalHeaderLabels({QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"),
-					    QStringLiteral("SCOREBOARD PNG"), QStringLiteral("BOTTOM BAR PNG"),
+					    QStringLiteral("การ์ด PNG (สำรอง)"), QStringLiteral("BOTTOM BAR PNG"),
 					    QStringLiteral("โลโก้ PNG")});
 	m_table->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
 	m_table->horizontalHeader()->setSectionResizeMode(ColSchool, QHeaderView::Stretch);
@@ -179,7 +183,9 @@ void FffDock::buildUi()
 
 	auto *rosterButtons = new QHBoxLayout();
 	auto *addButton = new QPushButton(QStringLiteral("เพิ่ม"), rosterBox);
-	auto *removeButton = new QPushButton(QStringLiteral("ลบ"), rosterBox);
+	// Four delete buttons share this box now, and this is the only one that
+	// removes data rather than an image, so it says what it removes.
+	auto *removeButton = new QPushButton(QStringLiteral("ลบนายก"), rosterBox);
 	auto *cardButton = new QPushButton(QStringLiteral("เลือกการ์ด PNG"), rosterBox);
 	auto *pinButton = new QPushButton(QStringLiteral("สุ่ม PIN"), rosterBox);
 	rosterButtons->addWidget(addButton);
@@ -196,6 +202,20 @@ void FffDock::buildUi()
 	rosterLayout->addLayout(assetButtons);
 	connect(bottomBarAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("bottomBar")); });
 	connect(logoAsset, &QPushButton::clicked, this, [this]() { chooseCard(QStringLiteral("logo")); });
+
+	// Every artwork a president carries can be taken off again. The PNG itself
+	// stays in the cards directory, so a mistaken press is undone by picking the
+	// same file again.
+	auto *clearButtons = new QHBoxLayout();
+	for (const auto &asset : {qMakePair(QStringLiteral("card"), QStringLiteral("ลบการ์ด PNG")),
+				  qMakePair(QStringLiteral("bottomBar"), QStringLiteral("ลบ BOTTOM BAR PNG")),
+				  qMakePair(QStringLiteral("logo"), QStringLiteral("ลบโลโก้กลาง PNG"))}) {
+		auto *button = new QPushButton(asset.second, rosterBox);
+		clearButtons->addWidget(button);
+		const QString kind = asset.first;
+		connect(button, &QPushButton::clicked, this, [this, kind]() { clearCard(kind); });
+	}
+	rosterLayout->addLayout(clearButtons);
 
 	auto *coverButtons = new QHBoxLayout();
 	auto *coverAsset = new QPushButton(QStringLiteral("เลือก Cover PNG"), rosterBox);
@@ -232,7 +252,7 @@ void FffDock::buildUi()
 
 	// Two toggles for one stream: at most one is on air, and pressing the one
 	// that is on air takes the board back to blank without ending the round.
-	m_revealButton = new QPushButton(QStringLiteral("SCOREBOARD"), liveBox);
+	m_revealButton = new QPushButton(QStringLiteral("Show Status"), liveBox);
 	m_bottomBarButton = new QPushButton(QStringLiteral("BOTTOM BAR"), liveBox);
 	for (QPushButton *button : {m_revealButton, m_bottomBarButton}) {
 		button->setMinimumHeight(38);
@@ -262,7 +282,7 @@ void FffDock::buildUi()
 	m_layoutLabel->setWordWrap(true);
 	layoutRow->addWidget(m_layoutLabel, 1);
 	m_resetMode = new QComboBox(liveBox);
-	m_resetMode->addItem(QStringLiteral("SCOREBOARD"), QStringLiteral("scoreboard"));
+	m_resetMode->addItem(QStringLiteral("Show Status"), QStringLiteral("scoreboard"));
 	m_resetMode->addItem(QStringLiteral("BOTTOM BAR"), QStringLiteral("bottomBar"));
 	layoutRow->addWidget(m_resetMode);
 	auto *resetLayoutButton = new QPushButton(QStringLiteral("รีเซ็ตตำแหน่งโหมดที่เลือก"), liveBox);
@@ -430,7 +450,7 @@ void FffDock::refreshLive()
 	// state at a glance without relying on the button fill alone.
 	m_streamStatus->setText(
 		revealed ? QStringLiteral("● ออกอากาศ · %1")
-				   .arg(bottomBar ? QStringLiteral("BOTTOM BAR") : QStringLiteral("SCOREBOARD"))
+				   .arg(bottomBar ? QStringLiteral("BOTTOM BAR") : QStringLiteral("Show Status"))
 			 : QStringLiteral("○ จอว่าง"));
 
 	m_revealButton->setEnabled(true);
@@ -538,7 +558,7 @@ void FffDock::chooseCard(const QString &kind)
 	const QString title = kind == QLatin1String("cover")       ? QStringLiteral("เลือก Cover PNG · แนะนำ 1920×1080")
 			      : kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
 			      : kind == QLatin1String("logo")      ? QStringLiteral("เลือกโลโก้กลาง PNG")
-								   : QStringLiteral("เลือก SCOREBOARD PNG");
+								   : QStringLiteral("เลือกการ์ด PNG สำรอง");
 	const QString file = QFileDialog::getOpenFileName(this, title, QString(), QStringLiteral("การ์ด PNG (*.png)"));
 	if (file.isEmpty())
 		return;
@@ -555,7 +575,17 @@ void FffDock::chooseCard(const QString &kind)
 		return;
 	}
 
-	const FffPresident *existing = m_session->presidentById(id);
+	applyAsset(kind, stored);
+}
+
+void FffDock::clearCard(const QString &kind)
+{
+	applyAsset(kind, QString());
+}
+
+void FffDock::applyAsset(const QString &kind, const QString &stored)
+{
+	const FffPresident *existing = m_session->presidentById(selectedPresidentId());
 	if (!existing)
 		return;
 	FffPresident updated = *existing;
@@ -565,10 +595,8 @@ void FffDock::chooseCard(const QString &kind)
 		updated.logo = stored;
 	else
 		updated.card = stored;
-	if (!m_session->updatePresident(updated)) {
+	if (!m_session->updatePresident(updated))
 		showSaveError();
-		refreshTable();
-	}
 	refreshTable();
 }
 

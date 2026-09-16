@@ -24,19 +24,31 @@
 .template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 .template-panel button { cursor: pointer; }
 .template-panel button:disabled { opacity: 0.55; cursor: default; }
-#templateViewport { height: 340px; overflow: auto; position: relative; touch-action: none; background-color: #252a32;
+/* Panning replaces the scrollbars, so the stage is clipped and its position is
+   owned entirely by the view transform. */
+#templateViewport { height: 340px; overflow: hidden; position: relative; touch-action: none; background-color: #252a32;
   background-image: conic-gradient(#343a43 25%, transparent 0 50%, #343a43 0 75%, transparent 0);
   background-size: 20px 20px; }
-#templateStage { position: absolute; left: 48px; top: 90px; width: 420px; height: 152px; transform-origin: top left; }
+#templateStage { position: absolute; left: 0; top: 0; width: 420px; height: 152px; transform-origin: top left; }
 #templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; transform: translate(2px, 2px); }
 #templateResize { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; padding: 0; border-radius: 0; background: var(--accent); pointer-events: auto; cursor: nwse-resize; }
 #templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; transform: translate(2px, 2px); }
 #templatePlaceholder[hidden] { display: none; }
+/* The panel swaps between the card, logo and counter templates, and each of
+   these carries its own display rule that would otherwise outrank [hidden]. */
+.template-panel [hidden], #templateLayers[hidden], #templateFontFields[hidden],
+#templateCount[hidden] { display: none; }
 #templateLayers { display: grid; gap: 5px; }
 #templateLayers [aria-pressed="true"] { border-color: var(--accent); background: #234666; }
 .template-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .template-fields label { display: grid; gap: 4px; }
-.template-fields input { width: 100%; }
+.template-fields input, .template-fields select { width: 100%; min-width: 0; }
+/* A colour input collapses to a hairline under the panel's shared padding. */
+.template-fields input[type="color"] { height: 38px; padding: 2px; cursor: pointer; }
+/* The sample is the only way to tell a family apart before it goes on air. */
+.font-preview { margin: 8px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: #0e1319; font-size: 26px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-synthesis: none; font-variant-numeric: tabular-nums; }
 @media (max-width: 1000px) { .monitor-workspace { grid-template-columns: minmax(0, 1fr); } }
 
 * {
@@ -318,13 +330,37 @@ body.overlay {
   overflow: hidden;
 }
 
-/* The overlay builds and measures its board while the stream is still clean, so
-   a blank board keeps its layout instead of being torn out of the box tree. A
-   visibility:hidden subtree paints nothing, so the source stays transparent and
-   the reveal only has to flip this back. */
+/* The overlay builds and measures both boards while the stream is still clean,
+   so a blank board keeps its layout instead of being torn out of the box tree.
+   The mode that is not on deck only needs its boxes: visibility:hidden paints
+   nothing, which costs nothing. */
 .overlay .board-wrap[hidden] {
   display: block;
   visibility: hidden;
+}
+
+/* The mode on deck is the one the next press puts on air, so it is painted
+   ahead of time: the raster tiles and the PNG textures are ready before the
+   operator touches anything, and zero opacity keeps the stream clean. Without
+   this the reveal frame is the first time any of it is drawn, which is what
+   made the first press of a session stutter.
+
+   The hint stays on across the reveal so the compositor keeps the same layer
+   instead of building a new one at the worst possible moment. */
+.overlay .board-wrap.on-deck {
+  will-change: opacity;
+}
+
+.overlay .board-wrap[hidden].on-deck {
+  visibility: visible;
+  opacity: 0;
+}
+
+/* Same idea one level down: the pieces are promoted while they are still off
+   air, so the entrance does not start by creating eighteen layers. Resting
+   pieces still release the hint, because .is-animating carries it from here. */
+.overlay .board-wrap[hidden].on-deck .bottom-motion {
+  will-change: transform, opacity;
 }
 
 /* ---------- monitor ---------- */
@@ -379,9 +415,9 @@ body.monitor {
   transform-origin: top left;
 }
 
-.draggable {
+/* Holding Space turns a preview into the hand tool. */
+.is-panning {
   cursor: grab;
-  touch-action: none;
 }
 
 .monitor .canvas.show-grid {
@@ -391,8 +427,43 @@ body.monitor {
   background-size: 60px 60px;
 }
 
-.draggable:active {
+.is-panning.grabbing {
   cursor: grabbing;
+}
+
+/* Floats over the preview so the zoom readout never costs the board any room. */
+.zoom-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(10, 13, 18, 0.82);
+  border: 1px solid var(--border);
+  user-select: none;
+}
+
+.zoom-bar button {
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  color: var(--text);
+  background: #252e3a;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.zoom-bar output {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .guide {
@@ -542,6 +613,19 @@ body.monitor {
   color: var(--text);
 }
 
+.status-controls { display: inline-flex; align-items: center; gap: 8px; }
+.status-controls[hidden], .flag-controls[hidden], .status-assets[hidden] { display: none; }
+.status-controls .status-qualified { background: var(--green); }
+.status-controls .status-unqualified { background: var(--red); }
+.status-controls .status-waiting { background: #3a424e; }
+.status-controls [aria-pressed="true"] { outline: 2px solid var(--ring); outline-offset: 2px; }
+.status-assets { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+.status-assets label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.status-assets input[type="file"] { max-width: 190px; color: var(--muted); }
+/* A status that already has artwork reads differently from an empty one. */
+.status-assets label.has-asset { color: var(--text); }
+.status-assets label.has-asset::before { content: "\2713"; color: var(--green); }
+
 .flag-controls .flag-none { background: #3a424e; }
 .flag-controls .flag-green { background: var(--green); }
 .flag-controls .flag-red { background: var(--red); }
@@ -589,6 +673,27 @@ body.monitor {
 .overlay .bottom-bar .bottom-motion.is-animating { will-change:transform,opacity; }
 .monitor .empty-logo { outline: 2px dashed #88929f; }
 .monitor .empty-logo::after { content: "โลโก้กลาง"; margin: auto; color: #88929f; }
+
+/* Flag counters. The default boxes sit above the logo column; the operator
+   moves them from the monitor like any other piece. */
+.bottom-bar .count-card { position: absolute; top: 690px; width: 110px; height: 130px; }
+.bottom-bar .count-red { left: 850px; }
+.bottom-bar .count-green { left: 960px; }
+/* Family, size, weight and colour all come from the counter template. Nothing
+   here may pin one of them, or the panel and the stream disagree. Synthesis is
+   off so a weight the font has no real face for falls back to the nearest one
+   it does have, the same way in the panel and on air, instead of being faked
+   differently in each. */
+.count-value { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  display: grid; place-items: center; line-height: 1;
+  font-synthesis: none; font-variant-numeric: tabular-nums; }
+.count-red .count-value { color: var(--red); }
+.count-green .count-value { color: var(--green); }
+/* Colour and family are the counter template's job; these are the fallbacks it
+   leaves in place when the operator has not chosen anything. */
+/* A counter resting on zero is still a piece the operator has to be able to
+   grab, so the monitor keeps its box visible. */
+.monitor .count-card { outline: 2px dashed #88929f; }
 .opacity-controls { display: inline-flex; gap: 10px; flex-wrap: wrap; }
 .opacity-controls input { width: 70px; }
 

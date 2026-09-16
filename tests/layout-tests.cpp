@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -230,6 +231,157 @@ int main(int argc, char **argv)
 	check(post(R"({"mode":"bottomBar","target":"logo","action":"front"})", QStringLiteral("layer")) == 200,
 	      "logo layer saves");
 	check(post(R"({"presidentId":"one"})", QStringLiteral("logo")) == 200, "select logo");
+	// The two flag counters are Bottom Bar pieces like the logo and the cover.
+	check(post(R"({"mode":"bottomBar","target":"count:red","layout":{"x":0.42,"y":0.62,"scale":1,"imageOpacity":0.75}})") ==
+		      200,
+	      "red count layout saves");
+	check(post(R"({"mode":"bottomBar","target":"count:green","layout":{"x":0.58,"y":0.62,"scale":1}})") == 200,
+	      "green count layout saves");
+	check(post(R"({"target":"count:red","reset":true})") == 404, "scoreboard rejects counts");
+	check(post(R"({"mode":"bottomBar","target":"count:blue","layout":{"x":0.5,"y":0.5,"scale":1}})") == 404,
+	      "unknown count colour rejected");
+	check(post(R"({"mode":"bottomBar","target":"count:green","action":"front"})", QStringLiteral("layer")) == 200,
+	      "count layer saves");
+	check(post(R"({"target":"count:green","action":"front"})", QStringLiteral("layer")) == 404,
+	      "scoreboard rejects count layers");
+	{
+		// Natural order runs logo, cards, the counters, then the cover, so a
+		// counter starts above every card and below the cover.
+		check(session.movePieceLayer(QStringLiteral("count:red"), QStringLiteral("backward"),
+					     QStringLiteral("bottomBar")),
+		      "counter moves down a layer");
+		const auto layers = state(session)
+					    .value(QStringLiteral("bottomBar"))
+					    .toObject()
+					    .value(QStringLiteral("layers"))
+					    .toObject();
+		check(layers.value(QStringLiteral("count:red")).toInt() <
+			      layers.value(QStringLiteral("count:green")).toInt(),
+		      "counters keep a stable relative order");
+	}
+
+	const QByteArray logoTemplate = R"({"mode":"bottomBar","piece":"logo",
+		"image":{"x":10,"y":20,"width":300,"height":180,"opacity":0.8}})";
+	const QByteArray countTemplate = R"({"mode":"bottomBar","piece":"count",
+		"value":{"x":-5,"y":4,"width":160,"height":140,"opacity":0.9},
+		"fontFamily":"Bai Jamjuree","fontSize":120,"fontWeight":900,
+		"colors":{"red":"#ff0055","green":"#00cc66"}})";
+	const QByteArray countBody = R"("value":{"x":0,"y":0,"width":10,"height":10},)"
+				     R"("colors":{"red":"#e23c3c","green":"#21b04a"},"fontWeight":700,)";
+	check(post(logoTemplate, QStringLiteral("template")) == 200, "logo template saves");
+	check(post(countTemplate, QStringLiteral("template")) == 200, "count template saves");
+	check(post(R"({"piece":"logo","image":{"x":0,"y":0,"width":10,"height":10}})", QStringLiteral("template")) ==
+		      400,
+	      "logo template needs bottom bar");
+	check(post(R"({"mode":"bottomBar","piece":"logo","image":{"x":0,"y":0,"width":0,"height":10}})",
+		   QStringLiteral("template")) == 400,
+	      "logo template rejects an empty box");
+	const auto countPost = [&](const QByteArray &tail) {
+		return post(R"({"mode":"bottomBar","piece":"count",)" + countBody + tail + "}",
+			    QStringLiteral("template"));
+	};
+	check(countPost(R"("fontFamily":"","fontSize":96)") == 200, "an empty family falls back to the page stack");
+	check(countPost(R"("fontFamily":"ไทยสบาย","fontSize":96)") == 200,
+	      "a Thai family name is accepted");
+	// Anything that could close out of a CSS font-family value is refused.
+	check(countPost(R"J("fontFamily":"Bad\";color:red","fontSize":96)J") == 400,
+	      "a quoted family is rejected");
+	check(countPost(R"J("fontFamily":"Bad;color:red","fontSize":96)J") == 400,
+	      "a semicolon in a family is rejected");
+	check(countPost(R"J("fontFamily":"url(x)","fontSize":96)J") == 400,
+	      "brackets in a family are rejected");
+	check(countPost(QByteArray(R"("fontFamily":")") + QByteArray(121, 'a') + R"(","fontSize":96)") == 400,
+	      "an overlong family is rejected");
+	check(countPost(R"("fontFamily":"Menlo","fontSize":12)") == 400, "font size below the floor rejected");
+	// The weight used to be pinned in the stylesheet, so the operator's choice
+	// never reached the screen. It is part of the template now.
+	check(post(R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
+		   R"("colors":{"red":"#e23c3c","green":"#21b04a"},"fontFamily":"","fontSize":96,"fontWeight":300})",
+		   QStringLiteral("template")) == 200,
+	      "a light weight saves");
+	for (const char *weight : {"50", "1000", "\"700\""}) {
+		check(post(QByteArray(R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
+				      R"("colors":{"red":"#e23c3c","green":"#21b04a"},"fontFamily":"","fontSize":96,"fontWeight":)") +
+				   weight + "})",
+			   QStringLiteral("template")) == 400,
+		      "a weight outside 100-900 is rejected");
+	}
+	check(post(R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
+		   R"("colors":{"red":"tomato","green":"#21b04a"},"fontFamily":"","fontSize":96})",
+		   QStringLiteral("template")) == 400,
+	      "a non-hex colour is rejected");
+	check(post(R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
+		   R"("colors":{"red":"#e23c3c"},"fontFamily":"","fontSize":96})",
+		   QStringLiteral("template")) == 400,
+	      "both counter colours are required");
+	check(post(countTemplate, QStringLiteral("template")) == 200, "count template saves again");
+	check(post(R"({"mode":"bottomBar","piece":"heading","image":{"x":0,"y":0,"width":10,"height":10}})",
+		   QStringLiteral("template")) == 400,
+	      "unknown template piece rejected");
+	{
+		const auto bottom = state(session).value(QStringLiteral("bottomBar")).toObject();
+		check(bottom.value(QStringLiteral("logoTemplate"))
+				      .toObject()
+				      .value(QStringLiteral("image"))
+				      .toObject()
+				      .value(QStringLiteral("width"))
+				      .toDouble() == 300,
+		      "logo template reaches the overlay");
+		const auto count = bottom.value(QStringLiteral("countTemplate")).toObject();
+		check(count.value(QStringLiteral("fontFamily")).toString() == QLatin1String("Bai Jamjuree") &&
+			      count.value(QStringLiteral("fontSize")).toDouble() == 120 &&
+			      count.value(QStringLiteral("fontWeight")).toDouble() == 900,
+		      "count font and weight reach the overlay");
+		const auto colors = count.value(QStringLiteral("colors")).toObject();
+		check(colors.value(QStringLiteral("red")).toString() == QLatin1String("#ff0055") &&
+			      colors.value(QStringLiteral("green")).toString() == QLatin1String("#00cc66"),
+		      "each counter keeps its own colour");
+	}
+	{
+		// Counters shipped naming one of five font keys and took their colour
+		// from the stylesheet. Such a session has to keep the box it already
+		// has instead of losing the whole template.
+		const QString path = QDir(configPath).filePath(QStringLiteral("session.json"));
+		QFile file(path);
+		check(file.open(QIODevice::ReadOnly), "read the saved session");
+		auto root = QJsonDocument::fromJson(file.readAll()).object();
+		file.close();
+		auto bottom = root.value(QStringLiteral("bottomBar")).toObject();
+		auto legacyCount = bottom.value(QStringLiteral("countTemplate")).toObject();
+		legacyCount.remove(QStringLiteral("fontFamily"));
+		legacyCount.remove(QStringLiteral("colors"));
+		legacyCount.remove(QStringLiteral("fontWeight"));
+		legacyCount.insert(QStringLiteral("font"), QStringLiteral("mono"));
+		bottom.insert(QStringLiteral("countTemplate"), legacyCount);
+		root.insert(QStringLiteral("bottomBar"), bottom);
+		check(file.open(QIODevice::WriteOnly), "rewrite the session as an older one");
+		file.write(QJsonDocument(root).toJson());
+		file.close();
+
+		FffSession migrated;
+		migrated.load();
+		const auto count = state(migrated)
+					   .value(QStringLiteral("bottomBar"))
+					   .toObject()
+					   .value(QStringLiteral("countTemplate"))
+					   .toObject();
+		check(count.value(QStringLiteral("value")).toObject().value(QStringLiteral("width")).toDouble() == 160,
+		      "an older counter template keeps its box");
+		check(!count.contains(QStringLiteral("font")) &&
+			      count.value(QStringLiteral("fontFamily")).toString().isEmpty(),
+		      "an older font key becomes the default stack");
+		const auto colors = count.value(QStringLiteral("colors")).toObject();
+		check(colors.value(QStringLiteral("red")).toString() == QLatin1String("#e23c3c") &&
+			      colors.value(QStringLiteral("green")).toString() == QLatin1String("#21b04a"),
+		      "an older counter template gains the stylesheet colours");
+		check(count.value(QStringLiteral("fontWeight")).toDouble() == 700,
+		      "an older counter template keeps the weight the stylesheet used to force");
+		session.load();
+		check(!bottom.value(QStringLiteral("logoTemplate")).toObject().contains(QStringLiteral("piece")) &&
+			      !count.contains(QStringLiteral("mode")),
+		      "routing fields are not stored");
+	}
+
 	auto bottomTemplate = QJsonDocument::fromJson(cardTemplate).object();
 	bottomTemplate.insert("mode", "bottomBar");
 	auto imageLayer = bottomTemplate.value("image").toObject();
@@ -251,12 +403,116 @@ int main(int argc, char **argv)
 	png.close();
 	person.bottomBar = session.importAsset(png.fileName(), person.id, QStringLiteral("bottomBar"));
 	check(!person.bottomBar.isEmpty() && session.updatePresident(person), "import bottom PNG");
+
+	// The scoreboard is a status board: one finished PNG per status, chosen per
+	// president, uploaded from the monitor rather than picked from a file dialog.
+	{
+		const QByteArray pngBytes = QByteArray::fromHex("89504e470d0a1a0a") + "status";
+		const auto postAsset = [&](const QString &id, const QString &kind, const QByteArray &bytes) {
+			QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/api/asset?presidentId=%2&kind=%3")
+							     .arg(server.boundPort())
+							     .arg(id, kind)));
+			request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("image/png"));
+			auto *reply = network.post(request, bytes);
+			QEventLoop loop;
+			QTimer timer;
+			timer.setSingleShot(true);
+			QObject::connect(&timer, &QTimer::timeout, reply, &QNetworkReply::abort);
+			QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+			timer.start(3000);
+			loop.exec();
+			const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+			reply->deleteLater();
+			return code;
+		};
+		const auto entry = [&]() {
+			const auto people = state(session).value(QStringLiteral("presidents")).toArray();
+			return people.isEmpty() ? QJsonObject() : people.at(0).toObject();
+		};
+		check(entry().value(QStringLiteral("status")).toString() == QLatin1String("waiting"),
+		      "a president starts out waiting");
+		// With no artwork for that status yet, the card behind it still goes up.
+		check(entry().value(QStringLiteral("statusUrl")).toString() ==
+			      entry().value(QStringLiteral("cardUrl")).toString(),
+		      "a status with no artwork falls back to the card");
+		check(postAsset(person.id, QStringLiteral("qualified"), pngBytes) == 200, "upload qualified PNG");
+		check(postAsset(person.id, QStringLiteral("nonsense"), pngBytes) == 400, "unknown status kind rejected");
+		check(postAsset(QStringLiteral("gone"), QStringLiteral("qualified"), pngBytes) == 404,
+		      "upload for a missing president rejected");
+		check(postAsset(person.id, QStringLiteral("waiting"), QByteArray("not a png at all")) == 400,
+		      "only PNG bytes are stored");
+		check(post(R"({"presidentId":"one","status":"qualified"})", QStringLiteral("status")) == 200,
+		      "set a status");
+		check(post(R"({"presidentId":"one","status":"sideways"})", QStringLiteral("status")) == 400,
+		      "invalid status rejected");
+		check(post(R"({"presidentId":"gone","status":"qualified"})", QStringLiteral("status")) == 404,
+		      "status for a missing president rejected");
+		const QString qualifiedUrl = entry().value(QStringLiteral("statusUrl")).toString();
+		check(qualifiedUrl.contains(QLatin1String("/api/qualified/")) &&
+			      entry().value(QStringLiteral("status")).toString() == QLatin1String("qualified"),
+		      "the status chooses the artwork");
+		FffSession restarted;
+		restarted.load();
+		const auto reopened =
+			QJsonDocument::fromJson(restarted.overlayStateJson()).object().value(QStringLiteral("presidents")).toArray().at(0).toObject();
+		check(reopened.value(QStringLiteral("status")).toString() == QLatin1String("qualified") &&
+			      reopened.value(QStringLiteral("statusUrl")).toString() == qualifiedUrl,
+		      "status and artwork survive a restart");
+		// Clearing one status leaves the others and drops back to the card.
+		check(postAsset(person.id, QStringLiteral("qualified"), QByteArray()) == 200, "clear qualified PNG");
+		check(entry().value(QStringLiteral("statusUrl")).toString() ==
+			      entry().value(QStringLiteral("cardUrl")).toString(),
+		      "clearing a status falls back to the card again");
+		check(post(R"({"presidentId":"one","status":"waiting"})", QStringLiteral("status")) == 200,
+		      "back to waiting");
+		person = *session.presidentById(person.id);
+	}
 	const auto firstUrl = session.assetUrl(person, QStringLiteral("bottomBar"));
 	const auto firstPath = session.assetPath(person, QStringLiteral("bottomBar"));
 	person.bottomBar = session.importAsset(png.fileName(), person.id, QStringLiteral("bottomBar"));
 	check(!person.bottomBar.isEmpty() && QFile::exists(firstPath), "staged replacement preserves old asset");
 	check(session.updatePresident(person) && firstUrl != session.assetUrl(person, QStringLiteral("bottomBar")),
 	      "same-second replacement changes URL");
+	// Artwork can be taken off a president again, not only replaced. The dock
+	// buttons clear the reference; the PNG stays on disk so a mistaken press is
+	// undone by picking the same file back.
+	{
+		FffPresident withArt = *session.presidentById(person.id);
+		withArt.card = session.importAsset(png.fileName(), person.id, QStringLiteral("card"));
+		withArt.logo = session.importAsset(png.fileName(), person.id, QStringLiteral("logo"));
+		check(!withArt.card.isEmpty() && !withArt.logo.isEmpty() && session.updatePresident(withArt),
+		      "president carries card, bottom bar and logo art");
+		const QString cardFile = session.assetPath(withArt, QStringLiteral("card"));
+		const auto urlFor = [&](const QString &kind) {
+			return session.assetUrl(*session.presidentById(person.id), kind);
+		};
+		check(!urlFor(QStringLiteral("card")).isEmpty() && !urlFor(QStringLiteral("bottomBar")).isEmpty() &&
+			      !urlFor(QStringLiteral("logo")).isEmpty(),
+		      "every kind resolves before anything is cleared");
+
+		FffPresident cleared = *session.presidentById(person.id);
+		cleared.logo.clear();
+		check(session.updatePresident(cleared), "clear the logo");
+		check(urlFor(QStringLiteral("logo")).isEmpty(), "a cleared kind stops resolving");
+		check(!urlFor(QStringLiteral("card")).isEmpty() && !urlFor(QStringLiteral("bottomBar")).isEmpty(),
+		      "clearing one kind leaves the others");
+
+		cleared = *session.presidentById(person.id);
+		cleared.card.clear();
+		check(session.updatePresident(cleared), "clear the card");
+		check(session.statusUrl(*session.presidentById(person.id)).isEmpty(),
+		      "with no status art and no card there is nothing to show");
+		check(QFile::exists(cardFile), "clearing a reference keeps the PNG on disk");
+
+		FffSession afterClear;
+		afterClear.load();
+		const FffPresident *reloaded = afterClear.presidentById(person.id);
+		check(reloaded && reloaded->card.isEmpty() && reloaded->logo.isEmpty() &&
+			      !reloaded->bottomBar.isEmpty(),
+		      "cleared artwork stays cleared after a restart");
+		person = *session.presidentById(person.id);
+	}
+
 	const auto scoreboardBeforeCover = state(session).value("pieces");
 	const QString firstCover = session.importAsset(png.fileName(), QString(), QStringLiteral("cover"));
 	check(!firstCover.isEmpty() && session.setCover(firstCover), "import and select cover");

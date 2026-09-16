@@ -31,6 +31,10 @@ GPL-2.0-or-later
 namespace {
 
 constexpr int kMaxRequestBytes = 64 * 1024;
+// Artwork uploaded from the monitor is the only thing that outgrows the normal
+// cap, and the monitor is local. A phone on the venue's network keeps the small
+// one, so nothing reachable from the LAN can make the plugin buffer megabytes.
+constexpr int kMaxUploadBytes = 8 * 1024 * 1024;
 constexpr int kHeartbeatMs = 15000;
 constexpr int kBadPinDelayMs = 1000;
 
@@ -218,14 +222,19 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 	}
 
 	conn.buffer.append(socket->readAll());
-	if (conn.buffer.size() > kMaxRequestBytes) {
+	const int limit = socket->peerAddress().isLoopback() ? kMaxUploadBytes : kMaxRequestBytes;
+	if (conn.buffer.size() > limit) {
 		send(socket, 413, "text/plain; charset=utf-8", "too large");
 		return;
 	}
 
 	const int headerEnd = conn.buffer.indexOf("\r\n\r\n");
-	if (headerEnd < 0)
+	if (headerEnd < 0) {
+		// No headers yet, so nothing has earned the larger allowance.
+		if (conn.buffer.size() > kMaxRequestBytes)
+			send(socket, 413, "text/plain; charset=utf-8", "too large");
 		return;
+	}
 
 	const QByteArray head = conn.buffer.left(headerEnd);
 	const QList<QByteArray> lines = head.split('\n');
@@ -240,7 +249,7 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		if (line.toLower().startsWith("content-length:"))
 			contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
 	}
-	if (contentLength < 0 || contentLength > kMaxRequestBytes) {
+	if (contentLength < 0 || contentLength > limit) {
 		send(socket, 400, "text/plain; charset=utf-8", "bad request");
 		return;
 	}
@@ -256,6 +265,7 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 
 	const QUrl url = QUrl::fromEncoded(parts.at(1));
 	const QString token = QUrlQuery(url).queryItemValue(QStringLiteral("token"));
+	m_query = QUrlQuery(url);
 	route(socket, parts.at(0), url.path(), token, body);
 }
 
@@ -293,6 +303,10 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 				    "application/javascript; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/view-zoom.js")) {
+			sendWebFile(socket, QStringLiteral("view-zoom.js"), "application/javascript; charset=utf-8");
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
 			// The overlay sees every flag before the reveal, so it is
 			// only ever served to OBS on this machine.
@@ -315,7 +329,9 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendCard(socket, QString(), QStringLiteral("cover"));
 			return;
 		}
-		for (const QString &kind : {QStringLiteral("bottomBar"), QStringLiteral("logo")}) {
+		for (const QString &kind : {QStringLiteral("bottomBar"), QStringLiteral("logo"),
+					    QStringLiteral("qualified"), QStringLiteral("unqualified"),
+					    QStringLiteral("waiting")}) {
 			const QString prefix = QStringLiteral("/api/") + kind + QStringLiteral("/");
 			if (path.startsWith(prefix)) {
 				sendCard(socket, path.mid(prefix.size()), kind);
@@ -355,15 +371,37 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			}
 			auto value = QJsonDocument::fromJson(body).object();
 			const QString mode = value.take(QStringLiteral("mode")).toString(QStringLiteral("scoreboard"));
+			const QString piece = value.take(QStringLiteral("piece")).toString(QStringLiteral("card"));
 			if (!FffSession::validMode(mode)) {
 				sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 				return;
 			}
-			if (!FffSession::validCardTemplate(value)) {
+			// The logo and the flag counters are Bottom Bar furniture: there
+			// is nothing on the scoreboard for them to describe.
+			if (piece != QLatin1String("card") && mode != QLatin1String("bottomBar")) {
+				sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+				return;
+			}
+			if (piece == QLatin1String("card")) {
+				if (!FffSession::validCardTemplate(value)) {
+					sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+					return;
+				}
+				const bool saved = m_session->setCardTemplate(value, mode);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			if (piece != QLatin1String("logo") && piece != QLatin1String("count")) {
+				sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+				return;
+			}
+			if (!(piece == QLatin1String("logo") ? FffSession::validLogoTemplate(value)
+							     : FffSession::validCountTemplate(value))) {
 				sendJson(socket, 400, "{\"error\":\"invalid template\"}");
 				return;
 			}
-			const bool saved = m_session->setCardTemplate(value, mode);
+			const bool saved = m_session->setBottomTemplate(piece, value);
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
@@ -373,6 +411,64 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		}
 		if (path == QLatin1String("/api/vote")) {
 			handleVote(socket, body);
+			return;
+		}
+		if (path == QLatin1String("/api/status")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "status is local only");
+				return;
+			}
+			const auto request = QJsonDocument::fromJson(body).object();
+			const QString id = request.value(QStringLiteral("presidentId")).toString();
+			const QString status = request.value(QStringLiteral("status")).toString();
+			if (!FffSession::validStatusName(status)) {
+				sendJson(socket, 400, "{\"error\":\"invalid status\"}");
+				return;
+			}
+			if (!m_session->presidentById(id)) {
+				sendJson(socket, 404, "{\"error\":\"president is gone\"}");
+				return;
+			}
+			const bool saved = m_session->setStatus(id, FffSession::statusFromName(status));
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		// Raw PNG bytes rather than multipart: one artwork per request, so there is
+		// nothing a form encoding would add but a parser to get wrong. An empty body
+		// clears the artwork for that status.
+		if (path == QLatin1String("/api/asset")) {
+			if (!socket->peerAddress().isLoopback()) {
+				send(socket, 403, "text/plain; charset=utf-8", "uploads are local only");
+				return;
+			}
+			const QString id = m_query.queryItemValue(QStringLiteral("presidentId"));
+			const QString kind = m_query.queryItemValue(QStringLiteral("kind"));
+			if (!FffSession::validStatusName(kind)) {
+				sendJson(socket, 400, "{\"error\":\"invalid kind\"}");
+				return;
+			}
+			const FffPresident *president = m_session->presidentById(id);
+			if (!president) {
+				sendJson(socket, 404, "{\"error\":\"president is gone\"}");
+				return;
+			}
+			QString stored;
+			if (!body.isEmpty()) {
+				stored = m_session->storeAsset(body, kind);
+				if (stored.isEmpty()) {
+					sendJson(socket, 400, "{\"error\":\"not a PNG\"}");
+					return;
+				}
+			}
+			FffPresident updated = *president;
+			if (kind == QLatin1String("qualified"))
+				updated.qualified = stored;
+			else if (kind == QLatin1String("unqualified"))
+				updated.unqualified = stored;
+			else
+				updated.waiting = stored;
+			const bool saved = m_session->updatePresident(updated);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
 		if (path == QLatin1String("/api/operator/vote")) {
@@ -474,7 +570,6 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 		sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 		return;
 	}
-	const QString special = mode == QLatin1String("bottomBar") ? QStringLiteral("logo") : QStringLiteral("heading");
 	if (request.contains(QStringLiteral("target"))) {
 		const QString target = request.value(QStringLiteral("target")).toString();
 		const bool reset = request.value(QStringLiteral("reset")).toBool();
@@ -483,8 +578,7 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
-		if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
-		    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+		if (!m_session->validPieceTarget(mode, target)) {
 			sendJson(socket, 404, "{\"error\":\"unknown layout target\"}");
 			return;
 		}
@@ -550,11 +644,9 @@ void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
 		sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 		return;
 	}
-	const QString special = mode == QLatin1String("bottomBar") ? QStringLiteral("logo") : QStringLiteral("heading");
 	const QString target = request.value(QStringLiteral("target")).toString();
 	const QString action = request.value(QStringLiteral("action")).toString();
-	if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
-	    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+	if (!m_session->validPieceTarget(mode, target)) {
 		sendJson(socket, 404, "{\"error\":\"unknown layer target\"}");
 		return;
 	}

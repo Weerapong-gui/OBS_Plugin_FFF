@@ -53,14 +53,85 @@ targets; absent entries use the existing grid and legacy `layout` values.
 ## BOTTOM BAR
 
 State adds `displayMode: "scoreboard" | "bottomBar"` and a `bottomBar` object
-containing `layout`, `pieces`, `layers`, `cardTemplate`, and `logoPresidentId`.
-Roster entries add `bottomBarUrl` and `logoUrl`. Existing scoreboard fields and
-requests remain compatible. Sessions without the new fields start in scoreboard.
+containing `layout`, `pieces`, `layers`, `cardTemplate`, `logoTemplate`,
+`countTemplate`, and `logoPresidentId`. Roster entries add `bottomBarUrl` and
+`logoUrl`. Existing scoreboard fields and requests remain compatible. Sessions
+without the new fields start in scoreboard.
 
 Layout/layer/template POST bodies accept `mode` (omitted means `scoreboard`).
-Bottom Bar uses `card:<id>` and `logo` targets. Optional layout `imageOpacity`
-and `resultOpacity` range from 0 to 1; omitted values inherit template opacity,
-then 1. Template `image.opacity` and `result.opacity` apply to all inheriting slots.
+Bottom Bar uses `card:<id>`, `logo`, `cover`, `count:red` and `count:green`
+targets. Optional layout `imageOpacity` and `resultOpacity` range from 0 to 1;
+omitted values inherit template opacity, then 1. Template `image.opacity` and
+`result.opacity` apply to all inheriting slots.
+
+### Logo, counters and their templates
+
+The centre logo and the two flag counters are Bottom Bar furniture with no
+counterpart on the scoreboard, so each carries its own template instead of
+borrowing the card one. `POST /api/template` takes an optional `piece`
+(omitted means `card`, which keeps the original body shape). `piece` of `logo`
+or `count` requires `"mode":"bottomBar"` and is rejected with 400 otherwise.
+
+```jsonc
+{"mode":"bottomBar","piece":"logo",
+ "image":{"x":0,"y":0,"width":220,"height":250,"opacity":1}}
+{"mode":"bottomBar","piece":"count",
+ "value":{"x":0,"y":0,"width":110,"height":130,"opacity":1},
+ "fontFamily":"Bai Jamjuree","fontSize":96,
+ "colors":{"red":"#e23c3c","green":"#21b04a"}}
+```
+
+Boxes use the same limits as the card template: x/y within ±2000, width/height
+1–2000, opacity 0–1. `fontSize` is 24–400 px. Anything else returns 400, and the
+stored template never keeps the `mode` or `piece` routing fields.
+
+`fontWeight` is 100–900. The stylesheet used to pin it at 700 while the panel's
+sample carried no weight at all, so the panel and the stream disagreed no matter
+what font was chosen — that was the whole of the reported mismatch. Weight now
+belongs to the template, `applyCountTemplate()` writes it for every view, and
+both the sample and the counter set `font-synthesis: none` so a weight the face
+does not really have falls back the same way in both instead of being faked
+differently in each. A template saved before the field existed is migrated to
+700, the weight it was always drawn at.
+
+The monitor builds the weight list from the **faces** `queryLocalFonts()`
+reports, not just the families: `FontData` carries a style name and never a
+number, so the name is mapped (Thin 100 … Black 900). Choosing a family keeps
+the current weight when that family really has the face and otherwise moves to
+the nearest one it does.
+
+`fontFamily` names a font installed on the operator's machine, so it travels as
+text; empty means the page's own stack. `FffSession::validFontFamily()` caps it
+at 120 characters and refuses control characters and `" ' ; { } < > \ / ( )`,
+which is everything that could break out of a CSS `font-family` value. Thai and
+other non-ASCII family names are fine. The monitor offers the installed families
+through `queryLocalFonts()` behind a button — the API needs both a user gesture
+and a permission, and is missing in some browsers, so a typed field is always
+available and a sample renders the chosen family before it goes on air. OBS's
+browser source resolves the name against the same installed fonts, so nothing
+has to be embedded.
+
+`colors.red` and `colors.green` are `#rrggbb` and are both required. One
+template carries the box, family and size for both counters, but a colour each.
+Counters that predate these fields (`"font"` naming one of five built-in keys)
+are migrated on load to `fontFamily: ""` plus the stylesheet's colours rather
+than being dropped.
+
+`count:red` and `count:green` are ordinary pieces: they take `pieces` and
+`layers` entries, drag, resize and fade independently, and share one
+`countTemplate` for their box, family and size. The tally itself is not part of the
+state — both views derive it from `presidents[].vote`. Natural stacking is
+logo, cards, `count:red`, `count:green`, then `cover` on top.
+
+When a tally changes, the number rolls through random digits for 520 ms in
+50 ms steps (`COUNT_ROLL` in `board.js`) and lands on the newest count. A flag
+arriving mid-roll updates the landing value without restarting the roll, so the
+board can never settle back on a stale number. Digits come from a seeded
+sequence read off the roll's own animation clock, so a paused frame is
+reproducible; a wall-clock guard settles the roll even where the browser paints
+no frames. Leaving the air clears the settled tally so the next entrance rolls
+again.
+
 `POST /api/display` with `{"mode":"bottomBar"}` reveals that mode without clearing
 votes; `POST /api/logo` with `{"presidentId":"id"}` selects only the central logo
 (use an empty ID to clear). Both are localhost-only. The dock's mode buttons are
@@ -70,8 +141,119 @@ display mode untouched, so the same round can go straight back up.
 
 Extended native/browser checks cover mode isolation, old session defaults,
 0/1/14/odd rosters, logo deletion, live votes, Clear, hide and restore, opacity,
-image replacement, geometry parity, and persistence rollback. Browser screenshots use fixture PNGs;
-actual school artwork and loading the built plugin in OBS remain manual checks.
+image replacement, geometry parity, and persistence rollback. They also cover
+counter placement and per-piece opacity, the logo and counter templates, font
+family and colour validation, and a tally that changes mid-roll. Browser screenshots
+use fixture PNGs; actual school artwork and loading the built plugin in OBS remain manual checks.
+
+## Show Status (the scoreboard)
+
+The scoreboard is a status board. Each president carries one finished PNG per
+status and the status they are currently on, all in `session.json`, so both
+survive a restart:
+
+```jsonc
+{ "id": "…", "card": "…",
+  "qualified": "qualified-<uuid>.png", "unqualified": "…", "waiting": "…",
+  "status": "waiting" }
+```
+
+SSE adds `status` and `statusUrl` per president. `statusUrl` is the artwork for
+the current status and **falls back to `cardUrl`** when that status has none, so
+a roster built before these fields still goes on air unchanged. `board.js` draws
+`statusUrl` and sets no vote class in this mode, which leaves `.slot .result` at
+its default `display: none` — the flag colour belongs to the bottom bar. The
+`waiting` class stays what it always was, the monitor's marker for a slot with
+nothing to show, so it never sits over finished artwork.
+
+`POST /api/status` `{"presidentId", "status"}` is localhost-only and rejects a
+status that is not one of the three rather than silently falling back to
+waiting (`FffSession::validStatusName()`).
+
+`POST /api/asset?presidentId=<id>&kind=<status>` takes **raw PNG bytes** as the
+body — one artwork per request, so a form encoding would add nothing but a
+parser to get wrong. An empty body clears that status's artwork.
+`FffSession::storeAsset()` holds the PNG magic-byte check and the UUID naming
+that `importAsset()` used to own, so the dock's file picker and the monitor's
+upload validate and name identically.
+
+Uploads are the only thing that outgrows the 64 KB request cap, so the cap is
+two-tier: 64 KB until the headers are complete and for every non-loopback peer,
+8 MB for a loopback request that has declared its `Content-Length`. A phone on
+the venue's network can never make the plugin buffer megabytes.
+
+The dock's reveal button and the monitor's edit-mode label read **Show Status**;
+the mode value stays `scoreboard`, so nothing about the API changed. Pressing it
+reveals the status board, pressing it again hides it without ending the round,
+and changing a card's status while on air replays that card's `reveal-in`.
+
+### Preparing both modes off air
+
+`showMode()` sets `displayMode` and `phase` in one change, so the SSE frame that
+tells the overlay "the mode is bottomBar now" is the same frame that says "and
+you are on air". The overlay used to keep one board and wipe it whenever the
+mode changed, which put a full teardown, rebuild of every piece, reassignment of
+every image `src` and a three-pass `applyPieceLayouts` inside the reveal frame.
+Measured over 14 cards, that press blocked for 17.9 ms against 1.1–1.6 ms for
+every later one — a dropped frame on air, before any rasterising.
+
+`overlay.html` now keeps **one wrap/board pair per mode** under `#stage`
+(`.board-wrap` carries the per-mode `layout` transform, so both halves have to
+be split, not just the board). While off air, `render()` prepares both; on air it
+prepares only the mode showing. `preparedKey` is per mode, and the coalesced
+relayout listener sits on `#stage` so it covers both boards. The globals `wrap`
+and `board` point at the pair for the current mode, which is what the browser
+checks read.
+
+Because there are two boards, `[data-target="card:<id>"]` is no longer unique in
+the document — `cover`, `logo`, `count:*` and `.bottom-motion` still are, since
+only the bottom bar has them. Checks scope their lookups to `board`.
+
+Only the mode **on deck** is painted: `.overlay .board-wrap[hidden].on-deck` is
+`visibility: visible` with `opacity: 0`, so its raster tiles and PNG textures are
+ready before the operator presses anything while the stream stays clean. A
+`visibility: hidden` subtree paints nothing, which also means it is never
+rasterised, so the reveal used to be the first time any of it was drawn — that is
+the part of the stutter that showed up even without a mode change.
+`will-change: opacity` stays on across the reveal so the compositor keeps the
+same layer, and the pieces inside are promoted while still off air, with
+`.is-animating` carrying the hint from there so resting pieces still release it.
+The mode that is not on deck keeps `visibility: hidden`: built and measured, but
+costing no raster.
+
+`tests/bottom-bar-cover.cjs` guards this two ways: the prepared-board checks
+assert the on-deck/off-deck split, and a timing check presses once with a mode
+switch, then three times without, and requires the first to cost about what the
+median later one does. The threshold is a ratio with a small absolute floor, so
+it travels between machines; it fails on the single-board design.
+
+### Preview zoom and pan
+
+`data/web/view-zoom.js` (served at `/view-zoom.js`, monitor only) gives both
+editing previews — the board `.frame`/`.canvas` and the template
+`#templateViewport`/`#templateStage` — the same view controls. The wheel zooms
+around the cursor, holding Space turns the pointer into a hand and dragging
+moves the view, and each preview carries a floating `.zoom-bar` with the zoom
+percentage, 1:1 and Fit. All of it is view state: it writes a transform on the
+preview's content element, is never saved to the session, and resets to Fit on
+reload. A window resize refits only while the operator has not chosen a zoom.
+
+Two things this has to keep true. Space belongs to a focused field first — the
+hand arms only when the event target is not an `input`, `select`, `textarea`,
+`button` or `contenteditable`, the same guard the arrow-key nudges use. And
+while Space is held the pan handler runs in the capture phase and calls
+`stopImmediatePropagation()`, so a piece can be neither selected nor moved;
+immediate matters because an editor may have its own handler on the very same
+element, where the capture flag no longer orders anything.
+
+Anything measuring in canvas pixels reads the scale that is actually on screen
+(`canvasScale()` in `monitor.html`, `stageView.scale` in the editor) rather than
+assuming the preview is at fit, so dragging follows the pointer at any zoom.
+The browser checks cover cursor anchoring, panning leaving every saved
+coordinate and the selection untouched, typing a space in a field, 1:1/Fit, and
+a drag while zoomed. `geometry()` at `tests/overlay-layout.cjs:145` already
+normalises by the live canvas rect, so the older checks are zoom- and
+pan-agnostic without change.
 
 ### Bottom Bar presentation regression
 
@@ -82,13 +264,15 @@ NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/bottom-bar-cover.cjs
 cmake --build --preset macos
 ```
 
-The focused cover suite checks the actual Web Animations timings: logo 180ms,
-cover 300ms, cards 450ms with an 80ms start and center-out pairs 45ms apart
+The focused cover suite checks the actual Web Animations timings: logo and both
+counters 180ms, cover 300ms, cards 450ms with an 80ms start and center-out pairs 45ms apart
 (stagger capped at 420ms), and interrupted exits 240ms. It samples animation
 progress directly, exercises roster changes and template overflow during entry,
 and checks that resting Overlay and Monitor retain no temporary wipe or clip.
 Live vote updates must leave existing pieces attached; roster reordering keeps
-their identities and in-flight animations. Resting pieces also release animation
+their identities and in-flight animations. Counter rolls are motion of their
+own, so the entrance checks read `entranceAnimations()`, which filters them out,
+and `countRolls()` covers them directly. Resting pieces also release animation
 transforms and compositor hints (`will-change`).
 The 14-card entrance ends at 800ms; the maximum entrance is 950ms.
 

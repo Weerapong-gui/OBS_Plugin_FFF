@@ -18,40 +18,98 @@ GPL-2.0-or-later
 #include <QJsonObject>
 #include <QDateTime>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QUuid>
 
 #include <algorithm>
 #include <cmath>
 
+// One box of a template: a position and a size in the piece's own pixels, with
+// an optional opacity. Shared by the card, logo and count templates so a box
+// can never mean one thing in one panel and something else in another.
+bool FffSession::validTemplateBox(const QJsonObject &layer)
+{
+	if (layer.contains(QStringLiteral("opacity"))) {
+		const auto opacity = layer.value(QStringLiteral("opacity"));
+		if (!opacity.isDouble() || !std::isfinite(opacity.toDouble()) || opacity.toDouble() < 0 ||
+		    opacity.toDouble() > 1)
+			return false;
+	}
+	for (const QString &key :
+	     {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
+		const auto number = layer.value(key);
+		if (!number.isDouble() || !std::isfinite(number.toDouble()))
+			return false;
+		const double n = number.toDouble();
+		if (key == QLatin1String("x") || key == QLatin1String("y")) {
+			if (n < -2000 || n > 2000)
+				return false;
+		} else if (n < 1 || n > 2000)
+			return false;
+	}
+	return true;
+}
+
 bool FffSession::validCardTemplate(const QJsonObject &value)
 {
 	for (const QString &name : {QStringLiteral("image"), QStringLiteral("result")}) {
-		const auto layer = value.value(name).toObject();
-		if (layer.contains(QStringLiteral("opacity"))) {
-			const auto opacity = layer.value(QStringLiteral("opacity"));
-			if (!opacity.isDouble() || !std::isfinite(opacity.toDouble()) || opacity.toDouble() < 0 ||
-			    opacity.toDouble() > 1)
-				return false;
-		}
-		for (const QString &key :
-		     {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"), QStringLiteral("height")}) {
-			const auto number = layer.value(key);
-			if (!number.isDouble() || !std::isfinite(number.toDouble()))
-				return false;
-			const double n = number.toDouble();
-			if (key == QLatin1String("x") || key == QLatin1String("y")) {
-				if (n < -2000 || n > 2000)
-					return false;
-			} else if (n < 1 || n > 2000)
-				return false;
-		}
+		if (!validTemplateBox(value.value(name).toObject()))
+			return false;
 	}
 	const auto order = value.value(QStringLiteral("order")).toArray();
 	return order.size() == 2 && ((order.at(0).toString() == QLatin1String("result") &&
 				      order.at(1).toString() == QLatin1String("image")) ||
 				     (order.at(0).toString() == QLatin1String("image") &&
 				      order.at(1).toString() == QLatin1String("result")));
+}
+
+bool FffSession::validLogoTemplate(const QJsonObject &value)
+{
+	return validTemplateBox(value.value(QStringLiteral("image")).toObject());
+}
+
+// The operator picks a font that is installed on this machine, so the family
+// name travels as text. Empty means the page's own stack. Everything that could
+// break out of a CSS font-family value is refused, Thai and other non-ASCII
+// family names are not.
+bool FffSession::validFontFamily(const QString &family)
+{
+	if (family.size() > 120)
+		return false;
+	for (const QChar character : family) {
+		if (character.unicode() < 0x20 || QStringLiteral("\"';{}<>\\/()").contains(character))
+			return false;
+	}
+	return true;
+}
+
+bool FffSession::validHexColor(const QString &color)
+{
+	static const QRegularExpression pattern(QStringLiteral("^#[0-9a-fA-F]{6}$"));
+	return pattern.match(color).hasMatch();
+}
+
+bool FffSession::validCountTemplate(const QJsonObject &value)
+{
+	if (!validTemplateBox(value.value(QStringLiteral("value")).toObject()))
+		return false;
+	const auto family = value.value(QStringLiteral("fontFamily"));
+	if (!family.isString() || !validFontFamily(family.toString()))
+		return false;
+	const auto colors = value.value(QStringLiteral("colors")).toObject();
+	for (const QString &vote : {QStringLiteral("red"), QStringLiteral("green")}) {
+		if (!validHexColor(colors.value(vote).toString()))
+			return false;
+	}
+	// The stylesheet used to pin the weight at 700, which is why the operator's
+	// choice never reached the screen. It belongs to the template now.
+	const auto weight = value.value(QStringLiteral("fontWeight"));
+	if (!weight.isDouble() || !std::isfinite(weight.toDouble()) || weight.toDouble() < 100 ||
+	    weight.toDouble() > 900)
+		return false;
+	const auto size = value.value(QStringLiteral("fontSize"));
+	return size.isDouble() && std::isfinite(size.toDouble()) && size.toDouble() >= 24 && size.toDouble() <= 400;
 }
 
 bool FffSession::setCardTemplate(const QJsonObject &value, const QString &mode)
@@ -71,6 +129,41 @@ bool FffSession::setCardTemplate(const QJsonObject &value, const QString &mode)
 	return true;
 }
 
+// The centre logo and the two flag counters are Bottom Bar furniture with no
+// counterpart on the scoreboard, so each keeps its own template instead of
+// borrowing the card one.
+bool FffSession::setBottomTemplate(const QString &piece, const QJsonObject &value)
+{
+	const bool logo = piece == QLatin1String("logo");
+	if (!logo && piece != QLatin1String("count"))
+		return false;
+	if (!(logo ? validLogoTemplate(value) : validCountTemplate(value)))
+		return false;
+	auto &target = logo ? m_bottomLogoTemplate : m_bottomCountTemplate;
+	const auto previous = target;
+	target = value;
+	if (!save()) {
+		target = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+// Every piece the Bottom Bar and the scoreboard can position or stack. Keeping
+// the one list here stops the HTTP validation and the session loader from
+// disagreeing about what exists.
+bool FffSession::validPieceTarget(const QString &mode, const QString &target) const
+{
+	const bool bottom = mode == QLatin1String("bottomBar");
+	if (target == (bottom ? QLatin1String("logo") : QLatin1String("heading")))
+		return true;
+	if (bottom && (target == QLatin1String("cover") || target == QLatin1String("count:red") ||
+		       target == QLatin1String("count:green")))
+		return true;
+	return target.startsWith(QLatin1String("card:")) && indexOf(target.mid(5)) >= 0;
+}
+
 FffSession::FffSession(QObject *parent) : QObject(parent) {}
 
 QString FffSession::newId()
@@ -88,6 +181,59 @@ QString FffSession::voteName(FffVote vote)
 	default:
 		return QStringLiteral("none");
 	}
+}
+
+QString FffSession::statusName(FffStatus status)
+{
+	switch (status) {
+	case FffStatus::Qualified:
+		return QStringLiteral("qualified");
+	case FffStatus::Unqualified:
+		return QStringLiteral("unqualified");
+	default:
+		return QStringLiteral("waiting");
+	}
+}
+
+FffStatus FffSession::statusFromName(const QString &name)
+{
+	if (name == QLatin1String("qualified"))
+		return FffStatus::Qualified;
+	if (name == QLatin1String("unqualified"))
+		return FffStatus::Unqualified;
+	return FffStatus::Waiting;
+}
+
+// statusFromName falls back to waiting, so callers that must reject a typo ask
+// this first rather than silently storing the wrong status.
+bool FffSession::validStatusName(const QString &name)
+{
+	return name == QLatin1String("waiting") || name == QLatin1String("unqualified") ||
+	       name == QLatin1String("qualified");
+}
+
+QString FffSession::statusUrl(const FffPresident &president) const
+{
+	const QString url = assetUrl(president, statusName(president.status));
+	return url.isEmpty() ? cardUrl(president) : url;
+}
+
+bool FffSession::setStatus(const QString &presidentId, FffStatus status)
+{
+	const int index = indexOf(presidentId);
+	if (index < 0)
+		return false;
+	const FffStatus previous = m_presidents[index].status;
+	if (previous == status)
+		return true;
+	m_presidents[index].status = status;
+	if (!save()) {
+		m_presidents[index].status = previous;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	return true;
 }
 
 FffVote FffSession::voteFromName(const QString &name)
@@ -380,10 +526,14 @@ bool FffSession::movePieceLayer(const QString &target, const QString &action, co
 		pieces.append({key, m_pieceLayers.value(key, index + 1), index + 1});
 	}
 
-	if (mode == QLatin1String("bottomBar"))
-		pieces.append({QStringLiteral("cover"),
-			       m_pieceLayers.value(QStringLiteral("cover"), m_presidents.size() + 1),
-			       static_cast<int>(m_presidents.size()) + 1});
+	if (mode == QLatin1String("bottomBar")) {
+		int natural = m_presidents.size() + 1;
+		for (const QString &key :
+		     {QStringLiteral("count:red"), QStringLiteral("count:green"), QStringLiteral("cover")}) {
+			pieces.append({key, m_pieceLayers.value(key, natural), natural});
+			++natural;
+		}
+	}
 
 	int current = -1;
 	for (int index = 0; index < pieces.size(); ++index) {
@@ -451,10 +601,13 @@ QString FffSession::cardsDir() const
 
 QString FffSession::assetPath(const FffPresident &president, const QString &kind) const
 {
-	const QString name = kind == QLatin1String("card")        ? president.card
-			     : kind == QLatin1String("bottomBar") ? president.bottomBar
-			     : kind == QLatin1String("logo")      ? president.logo
-								  : QString();
+	const QString name = kind == QLatin1String("card")          ? president.card
+			     : kind == QLatin1String("bottomBar")   ? president.bottomBar
+			     : kind == QLatin1String("logo")        ? president.logo
+			     : kind == QLatin1String("qualified")   ? president.qualified
+			     : kind == QLatin1String("unqualified") ? president.unqualified
+			     : kind == QLatin1String("waiting")     ? president.waiting
+								    : QString();
 	if (name.isEmpty() || QFileInfo(name).fileName() != name)
 		return QString();
 	return QDir(cardsDir()).filePath(name);
@@ -485,8 +638,9 @@ QStringList FffSession::assetPaths() const
 {
 	QStringList paths;
 	for (const FffPresident &president : m_presidents) {
-		for (const QString &kind :
-		     {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo")}) {
+		for (const QString &kind : {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
+					    QStringLiteral("qualified"), QStringLiteral("unqualified"),
+					    QStringLiteral("waiting")}) {
 			const QString path = assetPath(president, kind);
 			if (!path.isEmpty())
 				paths.append(path);
@@ -527,24 +681,33 @@ QString FffSession::importCard(const QString &path, const QString &id)
 	return importAsset(path, id, QStringLiteral("card"));
 }
 
-QString FffSession::importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind)
+QString FffSession::storeAsset(const QByteArray &png, const QString &kind)
 {
-	if (kind != QLatin1String("card") && kind != QLatin1String("bottomBar") && kind != QLatin1String("logo") &&
-	    kind != QLatin1String("cover"))
+	static const QStringList kinds = {QStringLiteral("card"),        QStringLiteral("bottomBar"),
+					  QStringLiteral("logo"),        QStringLiteral("cover"),
+					  QStringLiteral("qualified"),   QStringLiteral("unqualified"),
+					  QStringLiteral("waiting")};
+	if (!kinds.contains(kind))
 		return QString();
-	QFile source(sourcePath);
-	if (!source.open(QIODevice::ReadOnly))
-		return QString();
-	const QByteArray bytes = source.readAll();
-	if (!bytes.startsWith(QByteArray::fromHex("89504e470d0a1a0a")))
+	// Only real PNGs get in, whether they arrive from the file picker or over
+	// the wire: the overlay depends on transparency and nothing else is served.
+	if (!png.startsWith(QByteArray::fromHex("89504e470d0a1a0a")))
 		return QString();
 	const QString name = kind + QStringLiteral("-") + QUuid::createUuid().toString(QUuid::WithoutBraces) +
 			     QStringLiteral(".png");
-	Q_UNUSED(presidentId);
 	QSaveFile target(QDir(cardsDir()).filePath(name));
-	if (!target.open(QIODevice::WriteOnly) || target.write(bytes) != bytes.size() || !target.commit())
+	if (!target.open(QIODevice::WriteOnly) || target.write(png) != png.size() || !target.commit())
 		return QString();
 	return name;
+}
+
+QString FffSession::importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind)
+{
+	QFile source(sourcePath);
+	if (!source.open(QIODevice::ReadOnly))
+		return QString();
+	Q_UNUSED(presidentId);
+	return storeAsset(source.readAll(), kind);
 }
 
 bool FffSession::validMode(const QString &mode)
@@ -628,6 +791,10 @@ void FffSession::load()
 		president.card = entry.value(QStringLiteral("card")).toString();
 		president.bottomBar = entry.value(QStringLiteral("bottomBar")).toString();
 		president.logo = entry.value(QStringLiteral("logo")).toString();
+		president.qualified = entry.value(QStringLiteral("qualified")).toString();
+		president.unqualified = entry.value(QStringLiteral("unqualified")).toString();
+		president.waiting = entry.value(QStringLiteral("waiting")).toString();
+		president.status = statusFromName(entry.value(QStringLiteral("status")).toString());
 		president.pin = entry.value(QStringLiteral("pin")).toString();
 		if (!president.id.isEmpty())
 			m_presidents.append(president);
@@ -653,9 +820,34 @@ void FffSession::load()
 	m_bottomTemplate = bottom.value(QStringLiteral("cardTemplate")).toObject();
 	if (!validCardTemplate(m_bottomTemplate))
 		m_bottomTemplate = QJsonObject();
+	m_bottomLogoTemplate = bottom.value(QStringLiteral("logoTemplate")).toObject();
+	if (!validLogoTemplate(m_bottomLogoTemplate))
+		m_bottomLogoTemplate = QJsonObject();
+	m_bottomCountTemplate = bottom.value(QStringLiteral("countTemplate")).toObject();
+	// Counters used to name one of five built-in font keys and took their colour
+	// from the stylesheet. Carry those sessions forward on the defaults rather
+	// than dropping a template the operator already positioned.
+	if (m_bottomCountTemplate.contains(QStringLiteral("font"))) {
+		m_bottomCountTemplate.remove(QStringLiteral("font"));
+		m_bottomCountTemplate.insert(QStringLiteral("fontFamily"), QString());
+	}
+	if (!m_bottomCountTemplate.isEmpty()) {
+		// 700 is what the stylesheet forced before the weight was selectable, so
+		// an older template keeps the face it has always been drawn with.
+		if (!m_bottomCountTemplate.value(QStringLiteral("fontWeight")).isDouble())
+			m_bottomCountTemplate.insert(QStringLiteral("fontWeight"), 700);
+		auto colors = m_bottomCountTemplate.value(QStringLiteral("colors")).toObject();
+		if (!validHexColor(colors.value(QStringLiteral("red")).toString()))
+			colors.insert(QStringLiteral("red"), QStringLiteral("#e23c3c"));
+		if (!validHexColor(colors.value(QStringLiteral("green")).toString()))
+			colors.insert(QStringLiteral("green"), QStringLiteral("#21b04a"));
+		m_bottomCountTemplate.insert(QStringLiteral("colors"), colors);
+	}
+	if (!validCountTemplate(m_bottomCountTemplate))
+		m_bottomCountTemplate = QJsonObject();
 	for (bool isBottom : {false, true}) {
 		const auto modeRoot = isBottom ? bottom : root;
-		const QString special = isBottom ? QStringLiteral("logo") : QStringLiteral("heading");
+		const QString mode = isBottom ? QStringLiteral("bottomBar") : QStringLiteral("scoreboard");
 		auto &m_layout = isBottom ? m_bottomLayout : this->m_layout;
 		auto &m_pieceLayouts = isBottom ? m_bottomPieces : this->m_pieceLayouts;
 		auto &m_pieceLayers = isBottom ? m_bottomLayers : this->m_pieceLayers;
@@ -667,8 +859,7 @@ void FffSession::load()
 		m_pieceLayouts.clear();
 		const QJsonObject pieces = modeRoot.value(QStringLiteral("pieces")).toObject();
 		for (auto it = pieces.begin(); it != pieces.end(); ++it) {
-			if (it.key() != special && !(isBottom && it.key() == QLatin1String("cover")) &&
-			    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
+			if (!validPieceTarget(mode, it.key()))
 				continue;
 			const QJsonObject value = it.value().toObject();
 			FffLayout piece;
@@ -695,10 +886,7 @@ void FffSession::load()
 		m_pieceLayers.clear();
 		const QJsonObject layers = modeRoot.value(QStringLiteral("layers")).toObject();
 		for (auto it = layers.begin(); it != layers.end(); ++it) {
-			if (!it.value().isDouble())
-				continue;
-			if (it.key() != special && !(isBottom && it.key() == QLatin1String("cover")) &&
-			    (!it.key().startsWith(QLatin1String("card:")) || indexOf(it.key().mid(5)) < 0))
+			if (!it.value().isDouble() || !validPieceTarget(mode, it.key()))
 				continue;
 			m_pieceLayers.insert(it.key(), qBound(-10000, it.value().toInt(), 10000));
 		}
@@ -727,6 +915,10 @@ bool FffSession::save() const
 		entry.insert(QStringLiteral("pin"), president.pin);
 		entry.insert(QStringLiteral("bottomBar"), president.bottomBar);
 		entry.insert(QStringLiteral("logo"), president.logo);
+		entry.insert(QStringLiteral("qualified"), president.qualified);
+		entry.insert(QStringLiteral("unqualified"), president.unqualified);
+		entry.insert(QStringLiteral("waiting"), president.waiting);
+		entry.insert(QStringLiteral("status"), statusName(president.status));
 		presidents.append(entry);
 	}
 
@@ -737,7 +929,7 @@ bool FffSession::save() const
 	QJsonObject root;
 	root.insert(QStringLiteral("displayMode"), m_displayMode);
 	root.insert(QStringLiteral("bottomBar"), bottomBarJson());
-	root.insert(QStringLiteral("version"), 4);
+	root.insert(QStringLiteral("version"), 5);
 	if (!m_cardTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
@@ -799,6 +991,13 @@ QByteArray FffSession::overlayStateJson() const
 		entry.insert(QStringLiteral("cardUrl"), cardUrl(president));
 		entry.insert(QStringLiteral("bottomBarUrl"), assetUrl(president, QStringLiteral("bottomBar")));
 		entry.insert(QStringLiteral("logoUrl"), assetUrl(president, QStringLiteral("logo")));
+		entry.insert(QStringLiteral("status"), statusName(president.status));
+		entry.insert(QStringLiteral("statusUrl"), statusUrl(president));
+		// Per-status URLs so the monitor can say which statuses already have
+		// artwork without guessing from the one that happens to be showing.
+		for (const QString &kind : {QStringLiteral("qualified"), QStringLiteral("unqualified"),
+					    QStringLiteral("waiting")})
+			entry.insert(kind + QStringLiteral("Url"), assetUrl(president, kind));
 		entry.insert(QStringLiteral("vote"), voteName(voteOf(president.id)));
 		presidents.append(entry);
 	}
@@ -877,6 +1076,10 @@ QJsonObject FffSession::bottomBarJson() const
 	QJsonObject layout;
 	if (!m_bottomTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_bottomTemplate);
+	if (!m_bottomLogoTemplate.isEmpty())
+		root.insert(QStringLiteral("logoTemplate"), m_bottomLogoTemplate);
+	if (!m_bottomCountTemplate.isEmpty())
+		root.insert(QStringLiteral("countTemplate"), m_bottomCountTemplate);
 	layout.insert(QStringLiteral("x"), m_bottomLayout.x);
 	layout.insert(QStringLiteral("y"), m_bottomLayout.y);
 	layout.insert(QStringLiteral("scale"), m_bottomLayout.scale);

@@ -18,6 +18,101 @@
     slot.root.style.height = contentHeight + 4 + "px";
   }
 
+  // A single template box, in the piece's own pixels. The card template places
+  // two of these; the logo and the flag counters place one each.
+  window.applyPieceTemplate = function (element, box) {
+    if (!element) return;
+    if (!box) { element.removeAttribute("style"); return; }
+    Object.assign(element.style, { position: "absolute", left: box.x + "px", top: box.y + "px",
+      width: box.width + "px", height: box.height + "px", right: "auto", bottom: "auto",
+      opacity: String(box.opacity ?? 1) });
+  };
+  window.applyCountTemplate = function (element, template, vote) {
+    if (!element) return;
+    applyPieceTemplate(element, template && template.value);
+    // A family name installed on this machine. The session refuses quotes, so
+    // wrapping it here cannot escape the declaration. Empty keeps the page's
+    // own stack, and an empty colour keeps the stylesheet's flag colour.
+    const family = (template && template.fontFamily) || "";
+    element.style.fontFamily = family ? '"' + family + '"' : "";
+    element.style.fontSize = ((template && template.fontSize) || 96) + "px";
+    element.style.fontWeight = String((template && template.fontWeight) || 700);
+    element.style.color = (template && template.colors && template.colors[vote]) || "";
+  };
+  window.templateOpacity = function (state, key) {
+    if (key.startsWith("card:")) return state.cardTemplate?.image?.opacity;
+    if (key === "logo") return state.logoTemplate?.image?.opacity;
+    if (key.startsWith("count:")) return state.countTemplate?.value?.opacity;
+    return 1;
+  };
+
+  // The digits a roll shows are a pure function of the roll's own animation
+  // clock, so pausing or seeking lands on the same number every time and a
+  // frozen frame can be captured reproducibly.
+  const COUNT_ROLL = Object.freeze({ duration: 520, tick: 50 });
+  window.COUNT_ROLL = COUNT_ROLL;
+  function rollFrames(seed, max) {
+    const frames = [];
+    let value = ((seed * 2654435761) >>> 0) || 1;
+    for (let index = 0; index < Math.ceil(COUNT_ROLL.duration / COUNT_ROLL.tick); index++) {
+      value = (value ^ (value << 13)) >>> 0;
+      value = (value ^ (value >>> 17)) >>> 0;
+      value = (value ^ (value << 5)) >>> 0;
+      frames.push(value % (max + 1));
+    }
+    return frames;
+  }
+
+  function endRoll(element) {
+    clearTimeout(element._countTick);
+    clearTimeout(element._countTimer);
+    element._countRoll?.cancel();
+    element._countRoll = null;
+    element._countTick = 0;
+    element._countTimer = 0;
+  }
+
+  // Flags keep arriving while a roll is running. The landing number is read at
+  // the end and never captured at the start, so a roll always settles on the
+  // newest count and can never put a stale one back on air.
+  function rollCount(element, value, max) {
+    element._countTarget = value;
+    if (element._countRoll || element._countValue === value) return;
+    element._countValue = null;
+    element._countGeneration = (element._countGeneration || 0) + 1;
+    element._countFrames = rollFrames(element._countGeneration * 31 + value + 1, Math.max(1, max));
+    const animation = element.animate([{ transform: "scale(1.18)" }, { transform: "scale(1)" }],
+      { duration: COUNT_ROLL.duration, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+    element._countRoll = animation;
+    const tick = () => {
+      if (element._countRoll !== animation) return;
+      const time = Number(animation.currentTime) || 0;
+      element.textContent = String(element._countFrames[
+        Math.min(element._countFrames.length - 1, Math.floor(time / COUNT_ROLL.tick))]);
+      element._countTick = setTimeout(tick, COUNT_ROLL.tick);
+    };
+    const settle = () => {
+      if (element._countRoll !== animation) return;
+      endRoll(element);
+      element._countValue = element._countTarget;
+      element.textContent = String(element._countTarget);
+    };
+    tick();
+    // The roll has to end even on a frame the browser never paints, the same
+    // wall-clock guard the entrance transition keeps.
+    element._countTimer = setTimeout(settle, COUNT_ROLL.duration);
+    animation.finished.then(settle, () => {});
+  }
+
+  // Leaving the air ends any roll in flight so the next entrance counts up from
+  // nothing again instead of resuming a stale one.
+  window.resetCountRolls = function (root) {
+    for (const element of root.querySelectorAll(".count-value")) {
+      endRoll(element);
+      element._countValue = null;
+    }
+  };
+
   window.applyCardTemplate = function (slot, template) {
     for (const [name, selector] of [["image", ".card-image"], ["result", ".result"]]) {
       const el = slot.querySelector(selector);
@@ -95,6 +190,24 @@
     root._logo.classList.toggle("empty-logo", !url);
     if (root.children[state.presidents.length] !== root._logo)
       root.insertBefore(root._logo, root.children[state.presidents.length] || null);
+    if (!root._counts) {
+      root._counts = new Map();
+      for (const vote of ["red", "green"]) {
+        const piece = document.createElement("div");
+        piece.className = "piece count-card count-" + vote;
+        piece.dataset.target = "count:" + vote;
+        piece.innerHTML = '<div class="bottom-motion"><div class="count-value"></div></div>';
+        root._counts.set(vote, piece);
+      }
+    }
+    let place = state.presidents.length + 1;
+    for (const [vote, piece] of root._counts) {
+      const tally = opts.revealed || opts.showVotes
+        ? state.presidents.filter(president => president.vote === vote).length : 0;
+      rollCount(piece.querySelector(".count-value"), tally, state.presidents.length);
+      if (root.children[place] !== piece) root.insertBefore(piece, root.children[place] || null);
+      place++;
+    }
     if (!root._cover) {
       root._cover = document.createElement("div"); root._cover.className = "piece bottom-cover";
       root._cover.dataset.target = "cover";
@@ -116,7 +229,8 @@
     root.classList.toggle("bottom-bar", bottom);
     root.parentElement.classList.toggle("bottom-bar-wrap", bottom);
     if (root._mode !== state.mode) {
-      root.replaceChildren(); root._slots.clear(); root._logo = null; root._cover = null; root._mode = state.mode;
+      root.replaceChildren(); root._slots.clear(); root._logo = null; root._cover = null;
+      root._counts = null; root._mode = state.mode;
     }
     if (bottom) { renderBottomBar(root, state, opts); return; }
     const slots = root._slots;
@@ -137,8 +251,13 @@
       }
       seen.add(president.id);
 
-      if (president.cardUrl) {
-        if (slot.img.getAttribute("src") !== president.cardUrl) slot.img.src = president.cardUrl;
+      // The scoreboard shows one finished PNG per president: the artwork for
+      // whichever status they are on, falling back to the card behind it. The
+      // flag colour belongs to the bottom bar, so no vote class is set here and
+      // `.slot .result` stays at its default display:none.
+      const url = president.statusUrl || president.cardUrl || "";
+      if (url) {
+        if (slot.img.getAttribute("src") !== url) slot.img.src = url;
         slot.img.hidden = false;
         fitCardToImage(slot);
       } else {
@@ -148,13 +267,18 @@
         slot.root.style.height = "152px";
       }
 
-      const showVote = president.vote !== "none" && (revealed || opts.showVotes);
-      const className = "slot " + (showVote ? president.vote : "waiting") + (president.cardUrl ? " has-card" : "");
-      // Keep a reveal animation alive when another vote arrives mid-animation.
+      // `waiting` is the monitor's empty-slot frame, so it is only for a status
+      // that has no artwork yet — never over a finished PNG.
+      const className = "slot" + (url ? " has-card" : " waiting");
+      // Keep a reveal animation alive when another update arrives mid-animation.
       const animating = slot.root.classList.contains("reveal-in");
       if (slot.root.className !== className) slot.root.className = className + (animating ? " reveal-in" : "");
 
-      if (opts.justRevealed) {
+      // Replay on the press, and again whenever a president's status changes on
+      // air, so a change mid-show reads as a change.
+      const changed = slot._status !== president.status;
+      slot._status = president.status;
+      if (opts.justRevealed || (changed && revealed)) {
         slot.root.classList.remove("reveal-in");
         void slot.root.offsetWidth;
         slot.root.classList.add("reveal-in");
@@ -193,7 +317,11 @@
     wrap._templateActive = !!state.cardTemplate;
     for (const piece of pieces) {
       const slot = piece.querySelector(".slot");
-      if (slot) applyCardTemplate(slot, state.cardTemplate);
+      if (slot) { applyCardTemplate(slot, state.cardTemplate); continue; }
+      const target = piece.dataset.target;
+      if (target === "logo") applyPieceTemplate(piece.querySelector("img"), state.logoTemplate?.image);
+      else if (target.startsWith("count:"))
+        applyCountTemplate(piece.querySelector(".count-value"), state.countTemplate, target.slice(6));
     }
 
     const measured = pieces.map(piece => {
@@ -227,12 +355,14 @@
       const resultScaleY = layout.resultScaleY || 1;
       const result = piece.querySelector(".result");
       if (result && !state.cardTemplate) result.style.transform = `scale(${resultScaleX}, ${resultScaleY})`;
-      const image = piece.querySelector(".card-image");
-      if (image) image.style.opacity = String(layout.imageOpacity ?? (!key.startsWith("card:") ? 1 : state.cardTemplate?.image?.opacity) ?? 1);
+      const image = piece.querySelector(".card-image") || piece.querySelector(".count-value");
+      if (image) image.style.opacity = String(layout.imageOpacity ?? templateOpacity(state, key) ?? 1);
       if (result) result.style.opacity = String(layout.resultOpacity ?? state.cardTemplate?.result?.opacity ?? 1);
       const layer = state.layers && state.layers[key];
       // Match native layer ordering before the first explicit layer edit.
-      const defaultLayer = key === "cover" ? state.presidents.length + 1 :
+      const defaultLayer = key === "cover" ? state.presidents.length + 3 :
+        key === "count:green" ? state.presidents.length + 2 :
+        key === "count:red" ? state.presidents.length + 1 :
         key === "logo" ? 0 : state.presidents.findIndex(p => "card:" + p.id === key) + 1;
       piece.style.zIndex = Number.isInteger(layer) ? String(layer) : (state.mode === "bottomBar" ? String(defaultLayer) : "");
       layouts.set(key, { element: piece, layout: { ...layout, scaleX: scaleX, scaleY: scaleY,

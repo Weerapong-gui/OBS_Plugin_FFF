@@ -7,21 +7,32 @@
 </head>
 <body class="overlay">
 
-<div id="wrap" class="board-wrap" hidden>
-  <div id="board" class="board"></div>
+<!-- One board per display mode. Both are built and measured while the stream is
+     still clean, so the press that switches modes never has to rebuild one. -->
+<div id="stage">
+  <div id="wrap-scoreboard" class="board-wrap" hidden><div id="board-scoreboard" class="board"></div></div>
+  <div id="wrap-bottomBar" class="board-wrap" hidden><div id="board-bottomBar" class="board"></div></div>
 </div>
 
 <script src="/board.js"></script>
 <script>
-const wrap = document.getElementById("wrap");
-const board = document.getElementById("board");
+const stage = document.getElementById("stage");
+const MODES = ["scoreboard", "bottomBar"];
+const views = Object.fromEntries(MODES.map(mode => [mode, {
+  wrap: document.getElementById("wrap-" + mode), board: document.getElementById("board-" + mode),
+  preparedKey: null
+}]));
+// The pair the operator is looking at, or was looking at last. Everything that
+// animates or measures on air reads these, so the rest of the file is unchanged
+// by there being two boards.
+let wrap = views.scoreboard.wrap;
+let board = views.scoreboard.board;
 let lastPhase = null;
 let lastState = null;
 let displayedMode = null;
 let displayedRound = null;
 let transition = null;
 let motionGeneration = 0;
-let preparedKey = null;
 let relayout = 0;
 
 const BOTTOM_TIMING = Object.freeze({
@@ -198,7 +209,8 @@ function animateBottom(entering, done = () => {}) {
 // Geometry only has to be recomputed when something that can move a piece
 // changed. A vote changes colours, not boxes.
 function layoutKey(view, mode) {
-  return JSON.stringify([mode, view.layout, view.pieces, view.layers, view.cardTemplate, view.coverUrl,
+  return JSON.stringify([mode, view.layout, view.pieces, view.layers, view.cardTemplate,
+    view.logoTemplate, view.countTemplate, view.coverUrl,
     (view.presidents || []).map(p => [p.id, p.cardUrl, p.bottomBarUrl, p.logoUrl])]);
 }
 
@@ -207,13 +219,13 @@ function layoutKey(view, mode) {
 // geometry is already measured before the operator presses anything.
 function prepare(state, mode, justRevealed) {
   const view = modeState(state, mode);
-  renderBoard(board, view, { revealed: true, showVotes: true, justRevealed });
+  const target = views[mode];
+  renderBoard(target.board, view, { revealed: true, showVotes: true, justRevealed });
   const key = layoutKey(view, mode);
-  if (key !== preparedKey) {
-    preparedKey = key;
-    applyPieceLayouts(wrap, view);
+  if (key !== target.preparedKey) {
+    target.preparedKey = key;
+    applyPieceLayouts(target.wrap, view);
   }
-  refreshReveals();
 }
 
 function render(state) {
@@ -228,6 +240,7 @@ function render(state) {
       (!revealed || mode !== "bottomBar" || displayedRound !== state.round)) {
     animateBottom(false, () => {
       wrap.hidden = true;
+      resetCountRolls(board);
       displayedMode = null;
       render(lastState);
     });
@@ -237,23 +250,33 @@ function render(state) {
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
   const enteringBottom = revealed && mode === "bottomBar" && displayedMode !== "bottomBar";
+  wrap = views[mode].wrap;
+  board = views[mode].board;
   prepare(state, mode, justRevealed);
+  // Off air there is nothing to disturb, so the mode that is not showing is
+  // brought up to date too. That is the whole reason a mode change can go on
+  // air in one frame without rebuilding anything.
+  if (!revealed) for (const other of MODES) if (other !== mode) prepare(state, other, false);
+  refreshReveals();
+  // Only the mode on deck is kept painted; see the stylesheet.
+  for (const name of MODES) views[name].wrap.classList.toggle("on-deck", name === mode);
   if (!revealed) {
-    wrap.hidden = true; displayedMode = null;
+    for (const name of MODES) views[name].wrap.hidden = true;
+    resetCountRolls(board); displayedMode = null;
     return;
   }
-  wrap.hidden = false;
+  for (const name of MODES) views[name].wrap.hidden = name !== mode;
   displayedMode = mode; displayedRound = state.round;
   if (enteringBottom) animateBottom(true);
 }
 
 // A card PNG that still lands late resizes its slot, so the measured geometry
 // has to be taken again once — coalesced, not once per image.
-board.addEventListener("load", () => {
+stage.addEventListener("load", () => {
   if (relayout) return;
   relayout = requestAnimationFrame(() => {
     relayout = 0;
-    preparedKey = null;
+    for (const name of MODES) views[name].preparedKey = null;
     if (lastState) render(lastState);
   });
 }, true);

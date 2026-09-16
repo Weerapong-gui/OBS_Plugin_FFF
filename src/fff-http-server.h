@@ -10,6 +10,7 @@ GPL-2.0-or-later
 #include <QHash>
 #include <QObject>
 #include <QString>
+#include <QUrlQuery>
 #include <QStringList>
 
 class FffSession;
@@ -78,6 +79,8 @@ private:
 	void sendWebFile(QTcpSocket *socket, const QString &name, const QByteArray &contentType);
 	void sendCard(QTcpSocket *socket, const QString &presidentId, const QString &kind = QStringLiteral("card"));
 
+	// Query of the request being routed; the upload reads presidentId and kind.
+	QUrlQuery m_query;
 	FffSession *m_session = nullptr;
 	QTcpServer *m_server = nullptr;
 	QTimer *m_heartbeat = nullptr;

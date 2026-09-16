@@ -27,6 +27,14 @@ const server = http.createServer((req, res) => {
   res.end(fs.readFileSync(file));
 });
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+// The flag counters roll on a clock of their own. Every check below is about
+// pieces sliding on and off air, so they all ignore counter motion.
+const installEntranceHelper = () => {
+  window.entranceAnimations = () => board.getAnimations({ subtree: true })
+    .filter(animation => !animation.effect.target.classList.contains("count-value"));
+  window.countRolls = () => board.getAnimations({ subtree: true })
+    .filter(animation => animation.effect.target.classList.contains("count-value"));
+};
 (async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await puppeteer.launch({ executablePath: process.env.FFF_BROWSER || "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", headless: true, args: ["--no-sandbox"] });
@@ -36,6 +44,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     for (const [page, route] of [[overlay, "overlay"], [monitor, "monitor"]]) {
       page.on("pageerror", error => errors.push(error.message));
       await page.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+      await page.evaluateOnNewDocument(installEntranceHelper);
       await page.setViewport({ width: 1920, height: 1080 });
       await page.goto(`http://127.0.0.1:${server.address().port}/${route}`);
     }
@@ -59,6 +68,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       assert.ok(entrance[target].frames.some(frame => frame.clipPath && frame.clipPath !== "none"), "cards reveal through a clip");
     }
     assert.match(entrance.logo.frames[0].transform, /12px/);
+    for (const target of ["count:red", "count:green"]) {
+      assert.equal(entrance[target].timing.duration, 180, "counters enter on the logo's timing");
+      assert.match(entrance[target].frames[0].transform, /12px/);
+    }
     assert.ok(entrance.cover.frames.every(frame => !frame.transform || frame.transform === "none"), "cover never travels");
     const wipeEdge = await overlay.evaluate(() => {
       const el = board.querySelector('[data-target="card:a"] .bottom-motion');
@@ -72,18 +85,18 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     assert.equal(wipeEdge.color, wipeEdge.resultColor);
     assert.ok(Math.abs(wipeEdge.top - wipeEdge.clip) < 0.05, "12px wipe follows reveal edge without shrinking behind clip");
     const continuous = await overlay.evaluate(s => {
-      const before = board.getAnimations({ subtree: true });
+      const before = entranceAnimations();
       for (const animation of before) { animation.pause(); animation.currentTime = 100; }
       s.presidents[1].vote = "red";
       s.bottomBar.coverUrl = "";
       render(s);
-      const after = board.getAnimations({ subtree: true });
+      const after = entranceAnimations();
       const result = before.length > 0 && before.every(a => after.includes(a) && a.currentTime === 100);
       for (const animation of before) animation.play();
       return result;
     }, state);
     assert.equal(continuous, true, "vote during entrance preserves animation identity and progress");
-    await overlay.waitForFunction(() => board.getAnimations({ subtree: true }).length === 0, { polling: 20 });
+    await overlay.waitForFunction(() => entranceAnimations().length === 0, { polling: 20 });
     const resting = async page => assert.equal(await page.evaluate(() => [...board.querySelectorAll(".bottom-motion")].every(el => {
       const css = getComputedStyle(el);
       return css.clipPath === "none" && css.maskImage === "none" && css.transform === "none" &&
@@ -107,6 +120,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     for (const count of [0, 1, 5, 14, 40]) {
       const page = await browser.newPage();
       await page.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+      await page.evaluateOnNewDocument(installEntranceHelper);
       await page.goto(`http://127.0.0.1:${server.address().port}/overlay`);
       const roster = { ...state, presidents: Array.from({ length: count }, (_, i) => ({
         id: String(i), name: "Fixture " + (i + 1), school: "Test school", vote: i % 2 ? "none" : i % 4 ? "red" : "green", bottomBarUrl: PNG
@@ -159,7 +173,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       });
       const entries = await page.evaluate(s => {
         render(s);
-        for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 0; }
+        for (const a of entranceAnimations()) { a.pause(); a.currentTime = 0; }
         return [...board.querySelectorAll('[data-target^="card:"]')].map(el => ({
           timing: el.querySelector(".bottom-motion").getAnimations()[0].effect.getTiming(),
           wipeVisible: [...el.querySelectorAll(".bottom-wipe")].some(w => !w.hidden && getComputedStyle(w).display !== "none" && getComputedStyle(w).opacity !== "0")
@@ -170,7 +184,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
         await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => {}))); });
         for (const time of [0, 180, 350, 600, 800]) {
           await page.evaluate(async time => {
-            for (const a of board.getAnimations({ subtree: true })) {
+            for (const a of entranceAnimations()) {
               if (time >= a.effect.getComputedTiming().endTime) a.finish();
               else { a.pause(); a.currentTime = time; }
             }
@@ -184,7 +198,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
           window.setTimeout = window.motionFixtureTimeout;
           // Start a fresh, frozen presentation for the interruption checks below.
           animateBottom(true);
-          for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 0; }
+          for (const a of entranceAnimations()) { a.pause(); a.currentTime = 0; }
         });
       }
       assert.equal(entries.length, count);
@@ -223,53 +237,131 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
           s.presidents.reverse(); render(s);
           const order = [...board.children].map(piece => piece.dataset.target);
           return { results, addedRest: added.getAnimations({ subtree: true }).length === 0 && getComputedStyle(added).clipPath === "none",
-            reordered: order.join() === [...s.presidents.map(p => "card:" + p.id), "logo", "cover"].join() &&
+            reordered: order.join() === [...s.presidents.map(p => "card:" + p.id), "logo", "count:red", "count:green", "cover"].join() &&
               [...board.children].every(piece => identities.get(piece.dataset.target) === piece) && el.getAnimations()[0] === a };
         }, roster);
         assert.ok(updates.results.every(Boolean), "vote colors and result opacity update wipe without replay");
         assert.equal(updates.addedRest, true, "card added mid-entrance appears at rest");
         assert.equal(updates.reordered, true, "roster reorder preserves keyed pieces and surviving animations");
       }
-      await page.evaluate(() => { for (const a of board.getAnimations({ subtree: true })) a.finish(); });
+      await page.evaluate(() => { for (const a of entranceAnimations()) a.finish(); });
       await page.waitForFunction(() => !transition, { polling: 20 });
       await resting(page);
       if (capture) {
         await page.evaluate(s => render(s), roster);
+        // Let the counters land before the frame is taken; a roll in flight
+        // would put a random digit in an otherwise reproducible capture.
+        await page.waitForFunction(() => countRolls().length === 0, { polling: 20 });
         await page.screenshot({ path: "/private/tmp/fff-motion-rest.png", omitBackground: true });
         await monitor.evaluate(s => {
           editMode = "bottomBar"; document.getElementById("editMode").value = editMode;
           render(s);
           document.getElementById("editMode").dispatchEvent(new Event("change"));
         }, roster);
+        await monitor.waitForFunction(() => countRolls().length === 0, { polling: 20 });
         await monitor.screenshot({ path: "/private/tmp/fff-motion-monitor.png" });
         await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, state);
       }
       await page.close();
     }
+    // The press that also switches mode used to tear the board down and rebuild
+    // it inside the very frame that reveals it, which cost an order of magnitude
+    // more than any later press and dropped frames on air. Both modes are
+    // prepared while the stream is still clean, so the first press is as cheap
+    // as the third.
+    {
+      const timing = await browser.newPage();
+      timing.on("pageerror", error => errors.push(error.message));
+      await timing.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+      await timing.evaluateOnNewDocument(installEntranceHelper);
+      await timing.setViewport({ width: 1920, height: 1080 });
+      await timing.goto(`http://127.0.0.1:${server.address().port}/overlay`);
+      const roster = { ...state, bottomBar: { ...state.bottomBar, coverUrl: PNG },
+        presidents: Array.from({ length: 14 }, (_, i) => ({ id: String(i), name: "P" + i, school: "S",
+          vote: i % 2 ? "none" : i % 4 ? "red" : "green", cardUrl: PNG, bottomBarUrl: PNG, logoUrl: PNG })) };
+      const press = async (round) => timing.evaluate(s => {
+        const start = performance.now();
+        render(s);
+        return performance.now() - start;
+      }, { ...roster, displayMode: "bottomBar", phase: "revealed", round });
+      const settle = async (round) => {
+        await timing.evaluate(s => render(s), { ...roster, displayMode: "bottomBar", phase: "collecting", round });
+        await timing.waitForFunction(() => !transition, { polling: 20 });
+        await pause(120);
+      };
+      // A session that was last left on the scoreboard, still off air.
+      await timing.evaluate(s => render(s), { ...roster, displayMode: "scoreboard", phase: "collecting" });
+      await timing.waitForFunction(() => [...board.querySelectorAll("img[src]")].every(img => img.complete),
+        { polling: 20 });
+      await pause(200);
+      const first = await press(1);
+      await settle(1);
+      const later = [];
+      for (const round of [2, 3, 4]) { later.push(await press(round)); await settle(round); }
+      later.sort((a, b) => a - b);
+      const median = later[1];
+      // A ratio with a small absolute floor: raw milliseconds differ per machine,
+      // but a first press that rebuilds everything is many times a warm one.
+      assert.ok(first < median * 3 + 2,
+        `the first press costs about what a later one does: ${first.toFixed(1)}ms vs ${median.toFixed(1)}ms`);
+      await timing.close();
+    }
+
+    // Flag counters. A tally that changes while a roll is running has to be the
+    // one the board lands on; the older number must never come back on air.
+    const counters = () => overlay.evaluate(() => Object.fromEntries(["count:red", "count:green"].map(target =>
+      [target, document.querySelector(`[data-target="${target}"] .count-value`).textContent])));
+    await push();
+    await overlay.waitForFunction(() => countRolls().length === 0, { polling: 20 });
+    assert.deepEqual(await counters(), { "count:red": "0", "count:green": "1" }, "counters settle on the live tally");
+    const landing = await overlay.evaluate(async s => {
+      const red = board.querySelector('[data-target="count:red"] .count-value');
+      const redRoll = () => countRolls().find(a => a.effect.target === red);
+      s.presidents[1].vote = "red"; render(s);
+      const started = redRoll();
+      // A second flag lands while the first roll is still running.
+      s.presidents[0].vote = "red"; render(s);
+      const kept = !!started && redRoll() === started;
+      await new Promise(resolve => setTimeout(resolve, COUNT_ROLL.duration + 200));
+      return { started: !!started, kept, settled: red.textContent, resting: countRolls().length };
+    }, state);
+    assert.equal(landing.started, true, "a changed tally starts a roll");
+    assert.equal(landing.kept, true, "a tally arriving mid-roll never restarts the roll");
+    assert.equal(landing.settled, "2", "the roll lands on the newest tally, not the one it started with");
+    assert.equal(landing.resting, 0, "a settled roll releases its animation");
+    await overlay.evaluate(s => render({ ...s, phase: "collecting" }), state);
+    await overlay.waitForFunction(() => !transition && wrap.hidden, { polling: 20 });
+    assert.equal(await overlay.evaluate(() =>
+      [...board.querySelectorAll(".count-value")].every(el => el._countValue === null)), true,
+      "leaving the air drops the settled tally");
+    await overlay.evaluate(s => render({ ...s, phase: "revealed" }), state);
+    assert.ok(await overlay.evaluate(() => countRolls().length) > 0, "coming back on air rolls again");
+    await overlay.waitForFunction(() => countRolls().length === 0, { polling: 20 });
+    assert.deepEqual(await counters(), { "count:red": "0", "count:green": "1" }, "the fresh roll lands on the live tally");
     const coverInfo = page => page.evaluate(() => {
-      const p = document.querySelector('[data-target="cover"]');
+      const p = board.querySelector('[data-target="cover"]');
       return { width: p.offsetWidth, height: p.offsetHeight, transform: p.style.transform,
         opacity: p.querySelector("img").style.opacity, fit: getComputedStyle(p.querySelector("img")).objectFit,
         z: p.style.zIndex, pointer: getComputedStyle(p).pointerEvents };
     });
-    assert.deepEqual(await overlay.evaluate(() => ["logo", "card:a", "card:b", "cover"].map(target =>
-      document.querySelector(`[data-target="${target}"]`).style.zIndex)), ["0", "1", "2", "3"], "default stacking agrees with native layer actions");
+    assert.deepEqual(await overlay.evaluate(() => ["logo", "card:a", "card:b", "count:red", "count:green", "cover"].map(target =>
+      board.querySelector(`[data-target="${target}"]`).style.zIndex)), ["0", "1", "2", "3", "4", "5"], "default stacking agrees with native layer actions");
     const cover = await coverInfo(overlay);
     assert.equal(cover.width, 1920); assert.equal(cover.height, 1080); assert.equal(cover.opacity, "1");
-    assert.equal(cover.fit, "contain"); assert.equal(cover.z, "3");
+    assert.equal(cover.fit, "contain"); assert.equal(cover.z, "5");
     assert.equal((await coverInfo(monitor)).transform, cover.transform);
     assert.equal((await coverInfo(monitor)).pointer, "none");
     await monitor.select("#selection", "cover");
     assert.equal((await coverInfo(monitor)).pointer, "auto");
     assert.equal(await monitor.$eval("#resultOpacity", el => el.disabled), true);
-    assert.equal(await monitor.evaluate(() => board.getAnimations({ subtree: true }).length), 0);
+    assert.equal(await monitor.evaluate(() => entranceAnimations().length), 0);
     for (const opacity of [0, 0.5, 1]) {
       state.bottomBar.pieces.cover = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, imageOpacity: opacity };
       state.bottomBar.cardTemplate = { image: { x: 0, y: 0, width: 850, height: 250, opacity: 0.2 }, result: { x: 0, y: 0, width: 850, height: 250 }, order: ["result", "image"] };
       await push();
       assert.equal((await coverInfo(overlay)).opacity, String(opacity));
       assert.equal((await coverInfo(monitor)).opacity, String(opacity));
-      assert.equal(await overlay.evaluate(() => board.getAnimations({ subtree: true }).length), 0, "edits do not replay entrance");
+      assert.equal(await overlay.evaluate(() => entranceAnimations().length), 0, "edits do not replay entrance");
     }
     delete state.bottomBar.pieces.cover;
     await push(); assert.equal((await coverInfo(overlay)).opacity, "1", "reset ignores template opacity");
@@ -281,7 +373,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     });
     await push();
     for (const page of [overlay, monitor]) {
-      await page.waitForFunction(() => document.querySelector('[data-target="cover"] img').naturalWidth === 4, { polling: 20 });
+      await page.waitForFunction(() => board.querySelector('[data-target="cover"] img').naturalWidth === 4, { polling: 20 });
       assert.deepEqual(await page.$eval('[data-target="cover"] img', img => {
         const c = document.createElement("canvas"); c.width = 4; c.height = 2;
         const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
@@ -295,12 +387,12 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await overlay.evaluate(s => {
       // Begin a new round then explicitly sample a partly revealed card.
       render({ ...s, phase: "collecting", round: s.round + 1 });
-      for (const a of board.getAnimations({ subtree: true })) a.finish();
+      for (const a of entranceAnimations()) a.finish();
     }, state);
     await overlay.waitForFunction(() => !transition, { polling: 20 });
     const exitSample = await overlay.evaluate(s => {
       render(s);
-      for (const a of board.getAnimations({ subtree: true })) { a.pause(); a.currentTime = 160; }
+      for (const a of entranceAnimations()) { a.pause(); a.currentTime = 160; }
       const motion = board.querySelector('[data-target="card:a"] .bottom-motion');
       const before = getComputedStyle(motion);
       const sampled = { opacity: before.opacity, transform: before.transform, clipPath: before.clipPath };
@@ -319,26 +411,30 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await push(); await overlay.waitForFunction(() => !transition, { polling: 20 });
     state.phase = "collecting"; state.round++; state.presidents[0].vote = "none";
     await push();
-    assert.equal(await overlay.$eval('[data-target="card:a"] .slot', el => el.classList.contains("green")), true, "clear freezes old flag");
-    assert.equal(await overlay.$eval("#wrap", el => el.hidden), false);
+    const frozenFlag = () => overlay.evaluate(() =>
+      board.querySelector('[data-target="card:a"] .slot').classList.contains("green"));
+    assert.equal(await frozenFlag(), true, "clear freezes old flag");
+    assert.equal(await overlay.evaluate(() => wrap.hidden), false);
     state.presidents[0].vote = "red";
     await push();
-    assert.equal(await overlay.$eval('[data-target="card:a"] .slot', el => el.classList.contains("green")), true, "votes cannot alter exit snapshot");
+    assert.equal(await frozenFlag(), true, "votes cannot alter exit snapshot");
     await overlay.waitForFunction(() => wrap.hidden, { polling: 20 });
-    assert.equal(await overlay.$eval("#wrap", el => el.hidden), true);
+    assert.equal(await overlay.evaluate(() => wrap.hidden), true);
     state.phase = "revealed"; await push();
     await pause(35);
     state.displayMode = "scoreboard"; await push();
     await pause(35);
     state.displayMode = "bottomBar"; await push();
     await overlay.waitForFunction(() => !transition, { polling: 20 });
-    assert.equal(await overlay.$eval("#board", el => el.classList.contains("bottom-bar")), true);
-    assert.equal(await overlay.$eval("#wrap", el => el.hidden), false);
-    assert.equal(await overlay.evaluate(() => board.getAnimations({ subtree: true }).length), 0);
+    assert.equal(await overlay.evaluate(() => board.classList.contains("bottom-bar")), true);
+    assert.equal(await overlay.evaluate(() => wrap.hidden), false);
+    assert.equal(await overlay.evaluate(() => entranceAnimations().length), 0);
     state.displayMode = "scoreboard"; await push();
     await overlay.waitForFunction(() => !board.classList.contains("bottom-bar"), { polling: 20 });
-    assert.equal(await overlay.$eval("#board", el => el.classList.contains("bottom-bar")), false);
-    assert.equal(await overlay.$('[data-target="cover"]'), null);
+    assert.equal(await overlay.evaluate(() => board.classList.contains("bottom-bar")), false);
+    // The bottom bar stays prepared off air, so the cover still exists; what
+    // matters is that the scoreboard on air carries no cover of its own.
+    assert.equal(await overlay.evaluate(() => board.querySelector('[data-target="cover"]')), null);
     // Old sessions have no cover and still render their bottom bar.
     state.displayMode = "bottomBar"; delete state.bottomBar.coverUrl;
     await push(); await overlay.waitForFunction(() => !transition, { polling: 20 });
@@ -369,10 +465,10 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     state.phase = "revealed";
     const scoreboardContinuous = await overlay.evaluate(s => {
       render(s);
-      const before = board.getAnimations({ subtree: true });
+      const before = entranceAnimations();
       for (const animation of before) { animation.pause(); animation.currentTime = 100; }
       s.presidents[0].vote = "green"; render(s);
-      const after = board.getAnimations({ subtree: true });
+      const after = entranceAnimations();
       return before.length > 0 && before.every(a => after.includes(a) && a.currentTime === 100);
     }, state);
     assert.equal(scoreboardContinuous, true, "scoreboard vote preserves reveal animation");
@@ -382,6 +478,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     const warm = await browser.newPage();
     warm.on("pageerror", error => errors.push(error.message));
     await warm.evaluateOnNewDocument(() => { window.EventSource = class {}; });
+    await warm.evaluateOnNewDocument(installEntranceHelper);
     await warm.setViewport({ width: 1920, height: 1080 });
     await warm.goto(`http://127.0.0.1:${server.address().port}/overlay`);
     const asset = `http://127.0.0.1:${server.address().port}/img/`;
@@ -395,21 +492,33 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
       { polling: 20 });
     const blank = await warm.evaluate(() => {
       const images = [...board.querySelectorAll("img[src]")];
+      const other = views.scoreboard.wrap;
       return { hidden: wrap.hidden, pieces: board.querySelectorAll(".piece").length, images: images.length,
         ready: images.every(image => image.complete && image.naturalWidth > 0),
-        painted: getComputedStyle(wrap).visibility,
+        // On deck: painted, so the raster and the textures are warm, but wholly
+        // transparent so the stream stays clean.
+        opacity: getComputedStyle(wrap).opacity, visibility: getComputedStyle(wrap).visibility,
+        promoted: getComputedStyle(board.querySelector(".bottom-motion")).willChange,
+        // Off deck: built and measured, but never painted.
+        otherHidden: other.hidden, otherPainted: getComputedStyle(other).visibility,
+        otherLaidOut: [...other.querySelectorAll(".piece")].every(piece => piece.offsetWidth > 0),
         laidOut: [...board.querySelectorAll(".piece")].every(piece => piece.offsetWidth > 0) };
     });
     assert.equal(blank.hidden, true, "a collecting round stays off the stream");
-    assert.equal(blank.painted, "hidden", "the prepared board paints nothing");
-    assert.equal(blank.pieces, 5, "cards, logo and cover are mounted before the press");
+    assert.equal(blank.opacity, "0", "the prepared board puts nothing on the stream");
+    assert.equal(blank.visibility, "visible", "the mode on deck is painted, so its raster is warm before the press");
+    assert.equal(blank.promoted, "transform, opacity", "pieces on deck are promoted before the entrance, not during it");
+    assert.equal(blank.otherHidden, true, "the mode that is not on deck stays off the stream");
+    assert.equal(blank.otherPainted, "hidden", "the mode that is not on deck costs no raster");
+    assert.equal(blank.otherLaidOut, true, "the mode that is not on deck is still measured, so a switch rebuilds nothing");
+    assert.equal(blank.pieces, 7, "cards, logo, both counters and cover are mounted before the press");
     assert.equal(blank.images, 5, "every on-air image already has its source");
     assert.equal(blank.ready, true, "every on-air image is decoded before the press");
     assert.equal(blank.laidOut, true, "the blank board keeps its geometry");
     const beforeReveal = JSON.stringify([...served].sort());
     const opened = await warm.evaluate(s => {
       render({ ...s, phase: "revealed" });
-      return { shown: !wrap.hidden, animating: board.getAnimations({ subtree: true }).length };
+      return { shown: !wrap.hidden, animating: entranceAnimations().length };
     }, warming);
     assert.equal(opened.shown, true, "the press reveals in the same task");
     assert.ok(opened.animating > 0, "the entrance starts in the same task");
@@ -430,7 +539,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
     await warm.waitForFunction(() => wrap.hidden, { polling: 20 });
     const restored = await warm.evaluate(s => {
       render(s);
-      return { shown: !wrap.hidden, round: s.round, animating: board.getAnimations({ subtree: true }).length };
+      return { shown: !wrap.hidden, round: s.round, animating: entranceAnimations().length };
     }, hidden);
     assert.equal(restored.shown, true, "the same round comes straight back");
     assert.ok(restored.animating > 0, "and replays the entrance");

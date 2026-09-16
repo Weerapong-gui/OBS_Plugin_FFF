@@ -18,6 +18,10 @@ enum class FffPhase { Collecting, Revealed };
 
 enum class FffVote { None, Red, Green };
 
+// What the scoreboard says about a president. Deliberately its own axis: the
+// flags stay a separate thing that drives the bottom bar.
+enum class FffStatus { Waiting, Unqualified, Qualified };
+
 struct FffPresident {
 	QString id;
 	QString name;
@@ -26,6 +30,12 @@ struct FffPresident {
 	QString pin;
 	QString bottomBar;
 	QString logo;
+	// One finished PNG per status. A status with no artwork falls back to the
+	// card, so a roster built before these existed still goes on air.
+	QString qualified;
+	QString unqualified;
+	QString waiting;
+	FffStatus status = FffStatus::Waiting;
 };
 
 // Centre and scale on the 1920x1080 canvas, used for both the legacy board
@@ -87,8 +97,18 @@ public:
 	bool setPieceLayout(const QString &target, const FffLayout *layout,
 			    const QString &mode = QStringLiteral("scoreboard"));
 	bool resetLayouts(const QString &mode = QStringLiteral("scoreboard"));
+	static bool validTemplateBox(const QJsonObject &layer);
 	static bool validCardTemplate(const QJsonObject &value);
+	static bool validLogoTemplate(const QJsonObject &value);
+	static bool validCountTemplate(const QJsonObject &value);
+	// A locally installed font family name, or empty for the page's own stack.
+	static bool validFontFamily(const QString &family);
+	static bool validHexColor(const QString &color);
 	bool setCardTemplate(const QJsonObject &value, const QString &mode = QStringLiteral("scoreboard"));
+	// "logo" or "count"; both exist only in Bottom Bar.
+	bool setBottomTemplate(const QString &piece, const QJsonObject &value);
+	// "heading"/"logo", "cover", "count:red"/"count:green" or "card:<id>".
+	bool validPieceTarget(const QString &mode, const QString &target) const;
 	// Moves "heading" or "card:<id>" within the persisted stacking order.
 	bool movePieceLayer(const QString &target, const QString &action,
 			    const QString &mode = QStringLiteral("scoreboard"));
@@ -127,6 +147,15 @@ public:
 	static QString newId();
 	static QString voteName(FffVote vote);
 	static FffVote voteFromName(const QString &name);
+	static QString statusName(FffStatus status);
+	static FffStatus statusFromName(const QString &name);
+	static bool validStatusName(const QString &name);
+	bool setStatus(const QString &presidentId, FffStatus status);
+	// The artwork for a president's current status, or the card behind it.
+	QString statusUrl(const FffPresident &president) const;
+	// Writes PNG bytes into the cards directory and returns the stored name.
+	// Shared by the dock's file picker and the monitor's upload.
+	QString storeAsset(const QByteArray &png, const QString &kind);
 
 signals:
 	void changed();
@@ -136,6 +165,8 @@ private:
 	QString configDir() const;
 	QJsonObject bottomBarJson() const;
 	FffLayout m_bottomLayout;
+	QJsonObject m_bottomLogoTemplate;
+	QJsonObject m_bottomCountTemplate;
 	QHash<QString, FffLayout> m_bottomPieces;
 	QHash<QString, int> m_bottomLayers;
 	QJsonObject m_bottomTemplate;
