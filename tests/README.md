@@ -304,3 +304,11 @@ not loopback. They cover the 403/303/cookie flow, the one-second brake on a
 wrong key, `GET /api/monitor/access`, the upload cap lifted only for a valid
 cookie, and on-air routes refusing the cookie. Without a LAN address they print
 `SKIP: no LAN address` and pass.
+
+## Dock panels
+
+`dock-tests` builds the dock panels without OBS (`src/fff-dock.cpp`, the only
+file that needs the frontend API, stays out) and drives them offscreen with
+`QT_QPA_PLATFORM=offscreen`. `fffSetConfirmOverride()` answers confirmations so
+no modal loop runs. The tests CMake points Qt's OpenGL wrapper at OpenGL because
+current macOS SDKs no longer ship AGL.
