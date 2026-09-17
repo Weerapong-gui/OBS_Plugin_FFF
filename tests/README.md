@@ -352,3 +352,17 @@ the round, and `clearRound()` never touches it. Overlay state puts the chosen
 round's URL in `logoUrl` (empty when that school has no Round 2 PNG) and names
 both rounds in `logoRound1Url`/`logoRound2Url`. `GET /api/logo2/<id>` serves the
 artwork through the same shrink-to-stream renditions as every other asset.
+
+## Show Status motion
+
+`tests/status-motion.cjs` drives the real overlay. Show Status cards on deck are
+promoted before the press; on reveal each card slides in from `translateX(-48px)`
+over 600ms, 120ms after the one before it (a long roster still starts every card
+within 1.2s); on hide each leaves to `translateX(48px)` over 320ms, 60ms apart
+(within 0.6s), and the board hides only after the last card. Only `transform`
+and `opacity` animate, a status change on air replays just that card, and
+switching to BOTTOM BAR lets the cards leave first.
+
+```sh
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/status-motion.cjs
+```

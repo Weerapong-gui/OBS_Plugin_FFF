@@ -363,6 +363,14 @@ body.overlay {
   will-change: transform, opacity;
 }
 
+/* Show Status cards slide in one after another. They are promoted while on
+   deck, and while animating, so the entrance never starts by creating a layer
+   per card. The Bottom Bar has its own rules above. */
+.overlay .board-wrap[hidden].on-deck .board:not(.bottom-bar) > .piece > .slot,
+.overlay .board:not(.bottom-bar) > .piece.is-animating > .slot {
+  will-change: transform, opacity;
+}
+
 /* ---------- monitor ---------- */
 
 body.monitor {

@@ -341,6 +341,9 @@ async function main() {
       state.phase = "collecting";
       push();
       await ready(6);
+      // The Show Status cards leave one by one before the overlay takes the
+      // next state. Timed polling: this page is not in front.
+      await overlay.waitForFunction(() => wrap.hidden && !transition, { polling: 50 });
       console.log("PASS: status artwork upload, per-card status, fallback and on-air replay");
     }
 

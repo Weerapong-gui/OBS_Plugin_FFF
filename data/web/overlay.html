@@ -27,7 +27,6 @@ const views = Object.fromEntries(MODES.map(mode => [mode, {
 // by there being two boards.
 let wrap = views.scoreboard.wrap;
 let board = views.scoreboard.board;
-let lastPhase = null;
 let lastState = null;
 let displayedMode = null;
 let displayedRound = null;
@@ -38,6 +37,10 @@ let relayout = 0;
 const BOTTOM_TIMING = Object.freeze({
   logo: 240, cover: 400, card: 600, firstPair: 100, pair: 60,
   maxStagger: 560, exit: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+});
+const SCOREBOARD_TIMING = Object.freeze({
+  card: 600, stagger: 120, maxStagger: 1200, exit: 320, exitStagger: 60, maxExitStagger: 600,
+  easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 });
 
 // The operator's press must never be the first time the browser hears about a
@@ -210,6 +213,67 @@ function animateBottom(entering, done = () => {}) {
   active.timer = setTimeout(finish, deadline);
 }
 
+// Show Status cards slide in from the left one after another and leave to the
+// right in the same order. Only transform and opacity move, so the compositor
+// runs every frame; the saved placement stays on the outer piece.
+function animateScoreboard(entering, done = () => {}) {
+  const pieces = [...board.querySelectorAll(":scope > .piece")];
+  const slots = pieces.map(piece => piece.firstElementChild);
+  // board.js tags every card for its pop when the board is first built off
+  // air. This entrance replaces that pop, so only a status change made on air
+  // afterwards replays a single card.
+  if (entering) for (const slot of slots) slot.classList.remove("reveal-in");
+  // Read before cancelling: an exit can interrupt any point of the entrance.
+  const current = slots.map(slot => {
+    const style = getComputedStyle(slot);
+    return { opacity: style.opacity, transform: style.transform };
+  });
+  if (transition) {
+    clearTimeout(transition.timer);
+    for (const cleanup of transition.cleanups) cleanup();
+  }
+  const active = { generation: ++motionGeneration, entering, motions: [], cleanups: [], timer: null };
+  transition = active;
+  const finish = () => {
+    if (transition !== active || active.generation !== motionGeneration) return;
+    clearTimeout(active.timer);
+    transition = null;
+    for (const cleanup of active.cleanups) cleanup();
+    done();
+  };
+  // Spacing shrinks for a long roster so the whole sequence keeps its length.
+  const spacing = (step, max) => slots.length > 1 ? Math.min(step, max / (slots.length - 1)) : 0;
+  const step = entering ? spacing(SCOREBOARD_TIMING.stagger, SCOREBOARD_TIMING.maxStagger)
+    : spacing(SCOREBOARD_TIMING.exitStagger, SCOREBOARD_TIMING.maxExitStagger);
+  const duration = entering ? SCOREBOARD_TIMING.card : SCOREBOARD_TIMING.exit;
+  let deadline = 0;
+  slots.forEach((slot, index) => {
+    const piece = pieces[index], delay = index * step;
+    deadline = Math.max(deadline, delay + duration);
+    const frames = entering
+      ? [{ opacity: 0, transform: "translateX(-48px)" }, { opacity: 1, transform: "none" }]
+      : [{ opacity: current[index].opacity, transform: current[index].transform },
+         { opacity: 0, transform: "translateX(48px)" }];
+    piece.classList.add("is-animating");
+    const motion = slot.animate(frames, { duration, delay, fill: "both",
+      easing: entering ? SCOREBOARD_TIMING.easing : "ease-in" });
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      motion.cancel();
+      piece.classList.remove("is-animating");
+    };
+    active.cleanups.push(cleanup);
+    active.motions.push(motion);
+    // A card that has entered can rest on its own. A card that has left stays
+    // gone until the whole board hides, or it would flash back on air.
+    if (entering) motion.finished.catch(() => {}).then(cleanup);
+  });
+  Promise.all(active.motions.map(animation => animation.finished.catch(() => {}))).then(finish);
+  active.timer = setTimeout(finish, deadline);
+}
+
 // Geometry only has to be recomputed when something that can move a piece
 // changed. A vote changes colours, not boxes.
 function layoutKey(view, mode) {
@@ -221,10 +285,12 @@ function layoutKey(view, mode) {
 // Everything expensive happens here, and it runs while the board is still
 // blank: the DOM exists, the PNGs are attached and decoded, and the saved
 // geometry is already measured before the operator presses anything.
-function prepare(state, mode, justRevealed) {
+function prepare(state, mode) {
   const view = modeState(state, mode);
   const target = views[mode];
-  renderBoard(target.board, view, { revealed: true, showVotes: true, justRevealed });
+  // The overlay plays its own entrances (animateScoreboard, animateBottom);
+  // board.js only replays a single card whose status changes on air.
+  renderBoard(target.board, view, { revealed: true, showVotes: true, justRevealed: false });
   const key = layoutKey(view, mode);
   if (key !== target.preparedKey) {
     target.preparedKey = key;
@@ -240,9 +306,10 @@ function render(state) {
   // Freeze the outgoing round. Every incoming command updates lastState, and
   // the one completion below renders that latest state after the exit.
   if (transition && !transition.entering) return;
-  if (displayedMode === "bottomBar" && !wrap.hidden &&
-      (!revealed || mode !== "bottomBar" || displayedRound !== state.round)) {
-    animateBottom(false, () => {
+  if (displayedMode && !wrap.hidden &&
+      (!revealed || mode !== displayedMode || displayedRound !== state.round)) {
+    const leave = displayedMode === "bottomBar" ? animateBottom : animateScoreboard;
+    leave(false, () => {
       wrap.hidden = true;
       resetCountRolls(board);
       displayedMode = null;
@@ -251,16 +318,15 @@ function render(state) {
     return;
   }
 
-  const justRevealed = revealed && lastPhase !== "revealed";
-  lastPhase = state.phase;
   const enteringBottom = revealed && mode === "bottomBar" && displayedMode !== "bottomBar";
+  const enteringScoreboard = revealed && mode === "scoreboard" && displayedMode !== "scoreboard";
   wrap = views[mode].wrap;
   board = views[mode].board;
-  prepare(state, mode, justRevealed);
+  prepare(state, mode);
   // Off air there is nothing to disturb, so the mode that is not showing is
   // brought up to date too. That is the whole reason a mode change can go on
   // air in one frame without rebuilding anything.
-  if (!revealed) for (const other of MODES) if (other !== mode) prepare(state, other, false);
+  if (!revealed) for (const other of MODES) if (other !== mode) prepare(state, other);
   refreshReveals();
   // Only the mode on deck is kept painted; see the stylesheet.
   for (const name of MODES) views[name].wrap.classList.toggle("on-deck", name === mode);
@@ -272,6 +338,7 @@ function render(state) {
   for (const name of MODES) views[name].wrap.hidden = name !== mode;
   displayedMode = mode; displayedRound = state.round;
   if (enteringBottom) animateBottom(true);
+  if (enteringScoreboard) animateScoreboard(true);
 }
 
 // A card PNG that still lands late resizes its slot, so the measured geometry
