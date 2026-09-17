@@ -330,3 +330,14 @@ NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/monitor-ui.cjs
 
 `overlay-layout.cjs` opens a tool's tab through `press()` before clicking it and
 switches edit mode with `setEditMode()`.
+
+## Asset renditions
+
+`asset-rendition-tests` covers `src/fff-asset-rendition.*` and the server path
+that uses it. Artwork larger than 1920×1080 is shrunk to fit (4500×8000 becomes
+607×1080) with its transparency and colours intact, the original file stays as
+imported, and the size is read from the PNG header so the UI thread never
+decodes. Over loopback, an oversized asset is served as its rendition, a small
+one byte for byte, a new cover is shrunk before anything requests it, and every
+asset URL carries `fit=1920x1080` so a browser cache holding full-size bytes is
+never reused.

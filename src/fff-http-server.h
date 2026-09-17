@@ -8,10 +8,16 @@ GPL-2.0-or-later
 
 #include <QByteArray>
 #include <QHash>
+#include <QList>
 #include <QObject>
+#include <QPointer>
+#include <QSet>
 #include <QString>
-#include <QUrlQuery>
 #include <QStringList>
+#include <QThreadPool>
+#include <QUrlQuery>
+
+#include <optional>
 
 class FffSession;
 class QTcpServer;
@@ -27,8 +33,10 @@ class QTimer;
  * because EventSource reconnects on its own - which is exactly what a phone on
  * event Wi-Fi needs.
  *
- * Everything runs on the OBS UI thread. Requests are a few hundred bytes each
- * and files are cached in memory, so nothing here blocks long enough to matter.
+ * Everything runs on the OBS UI thread except shrinking oversized artwork,
+ * which a single worker thread does ahead of time. Requests are a few hundred
+ * bytes each and files are cached in memory, so nothing here blocks long enough
+ * to matter.
  */
 class FffHttpServer : public QObject {
 	Q_OBJECT
@@ -90,6 +98,14 @@ private:
 	void sendJson(QTcpSocket *socket, int code, const QByteArray &json);
 	void sendWebFile(QTcpSocket *socket, const QString &name, const QByteArray &contentType);
 	void sendCard(QTcpSocket *socket, const QString &presidentId, const QString &kind = QStringLiteral("card"));
+	// Bytes served for an asset path: its shrunk rendition when one exists,
+	// else the file itself. Empty when neither can be read.
+	std::optional<QByteArray> cardBytes(const QString &path);
+	// Artwork larger than the stream is shrunk once, off the UI thread, as
+	// soon as it enters the session; see fff-asset-rendition.h.
+	void prepareRenditions();
+	void ensureRendition(const QString &path);
+	void renditionFinished(const QString &path, bool written);
 
 	// Query of the request being routed; the upload reads presidentId and kind.
 	QUrlQuery m_query;
@@ -103,4 +119,11 @@ private:
 	QHash<QString, QString> m_tokens;
 	QHash<QString, QByteArray> m_fileCache;
 	QHash<QString, QByteArray> m_cardCache;
+	// One job at a time: decoding a 4500x8000 PNG alone needs 144 MB.
+	QThreadPool m_renditionPool;
+	QSet<QString> m_renditionJobs;
+	// Paths known to need no job: already small, already shrunk or unreadable.
+	QSet<QString> m_renditionChecked;
+	// Requests that arrived while their rendition was still being made.
+	QHash<QString, QList<QPointer<QTcpSocket>>> m_waitingRenditions;
 };

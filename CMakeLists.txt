@@ -91,6 +91,8 @@ if(ENABLE_QT AND ENABLE_FRONTEND_API)
   target_sources(
     ${CMAKE_PROJECT_NAME}
     PRIVATE
+      src/fff-asset-rendition.cpp
+      src/fff-asset-rendition.h
       src/fff-dock.cpp
       src/fff-dock-live.cpp
       src/fff-dock-live.h

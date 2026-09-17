@@ -6,6 +6,7 @@ GPL-2.0-or-later
 
 #include "fff-session.h"
 
+#include "fff-asset-rendition.h"
 #include "fff-monitor-access.h"
 
 #include <obs-module.h>
@@ -654,7 +655,8 @@ QString FffSession::assetUrl(const FffPresident &president, const QString &kind)
 	const QString path = assetPath(president, kind);
 	if (path.isEmpty() || !QFileInfo::exists(path))
 		return QString();
-	return QStringLiteral("/api/%1/%2?v=%3").arg(kind, president.id, QFileInfo(path).fileName());
+	return QStringLiteral("/api/%1/%2?v=%3&%4")
+		.arg(kind, president.id, QFileInfo(path).fileName(), FffAssetRendition::urlTag());
 }
 
 QString FffSession::coverPath() const
@@ -667,7 +669,9 @@ QString FffSession::coverPath() const
 QString FffSession::coverUrl() const
 {
 	const QString path = coverPath();
-	return path.isEmpty() || !QFileInfo::exists(path) ? QString() : QStringLiteral("/api/cover?v=%1").arg(m_cover);
+	return path.isEmpty() || !QFileInfo::exists(path)
+		       ? QString()
+		       : QStringLiteral("/api/cover?v=%1&%2").arg(m_cover, FffAssetRendition::urlTag());
 }
 
 QStringList FffSession::assetPaths() const

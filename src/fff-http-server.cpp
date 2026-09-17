@@ -5,6 +5,7 @@ GPL-2.0-or-later
 */
 
 #include "fff-http-server.h"
+#include "fff-asset-rendition.h"
 #include "fff-monitor-access.h"
 #include "fff-session.h"
 
@@ -117,6 +118,7 @@ QString randomToken()
 
 FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(parent), m_session(session)
 {
+	m_renditionPool.setMaxThreadCount(1);
 	m_heartbeat = new QTimer(this);
 	m_heartbeat->setInterval(kHeartbeatMs);
 	connect(m_heartbeat, &QTimer::timeout, this, &FffHttpServer::sendHeartbeat);
@@ -132,10 +134,12 @@ FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(par
 			else
 				it = m_cardCache.erase(it);
 		}
+		prepareRenditions();
 		pushState();
 	});
 
 	connect(m_session, &FffSession::monitorAccessChanged, this, &FffHttpServer::dropRemoteMonitors);
+	prepareRenditions();
 }
 
 FffHttpServer::~FffHttpServer()
@@ -143,6 +147,9 @@ FffHttpServer::~FffHttpServer()
 	// Sibling widgets are children of the same dock and may already be gone by
 	// the time Qt gets here, so stop()'s clientsChanged must not reach them.
 	const QSignalBlocker blocker(this);
+	// A job still running would report back into a destroyed server.
+	m_renditionPool.clear();
+	m_renditionPool.waitForDone();
 	stop();
 }
 
@@ -183,6 +190,7 @@ void FffHttpServer::stop()
 	m_tokens.clear();
 	m_fileCache.clear();
 	m_cardCache.clear();
+	m_waitingRenditions.clear();
 
 	if (m_server) {
 		m_server->close();
@@ -881,19 +889,83 @@ void FffHttpServer::sendCard(QTcpSocket *socket, const QString &presidentId, con
 		return;
 	}
 
-	auto cached = m_cardCache.find(path);
-	if (cached == m_cardCache.end()) {
-		QFile file(path);
-		if (!file.open(QIODevice::ReadOnly)) {
-			send(socket, 404, "text/plain; charset=utf-8", "no asset");
-			return;
-		}
-		// Reading once keeps the reveal off the disk: the overlay asks for a
-		// roster's worth of PNGs and this all runs on the OBS UI thread.
-		cached = m_cardCache.insert(path, file.readAll());
+	// Artwork still being shrunk is answered when its rendition lands, so a
+	// browser never caches the full-size bytes under this URL.
+	ensureRendition(path);
+	if (m_renditionJobs.contains(path)) {
+		auto it = m_conns.find(socket);
+		if (it != m_conns.end())
+			it.value().closing = true;
+		m_waitingRenditions[path].append(QPointer<QTcpSocket>(socket));
+		return;
 	}
 
+	const std::optional<QByteArray> bytes = cardBytes(path);
+	if (!bytes) {
+		send(socket, 404, "text/plain; charset=utf-8", "no asset");
+		return;
+	}
 	// Every import lands under a fresh UUID file name and the URL carries it as
 	// ?v=, so a given asset URL can never change content.
-	send(socket, 200, "image/png", cached.value(), "public, max-age=31536000, immutable");
+	send(socket, 200, "image/png", *bytes, "public, max-age=31536000, immutable");
+}
+
+std::optional<QByteArray> FffHttpServer::cardBytes(const QString &path)
+{
+	auto cached = m_cardCache.constFind(path);
+	if (cached != m_cardCache.constEnd())
+		return cached.value();
+
+	const QString rendition = FffAssetRendition::renditionPath(path);
+	QFile file(QFileInfo::exists(rendition) ? rendition : path);
+	if (!file.open(QIODevice::ReadOnly))
+		return std::nullopt;
+	// Reading once keeps the reveal off the disk: the overlay asks for a
+	// roster's worth of PNGs and this all runs on the OBS UI thread.
+	return m_cardCache.insert(path, file.readAll()).value();
+}
+
+void FffHttpServer::prepareRenditions()
+{
+	for (const QString &path : m_session->assetPaths())
+		ensureRendition(path);
+}
+
+void FffHttpServer::ensureRendition(const QString &path)
+{
+	if (m_renditionChecked.contains(path) || m_renditionJobs.contains(path))
+		return;
+	const QString target = FffAssetRendition::renditionPath(path);
+	if (QFileInfo::exists(target) || !FffAssetRendition::needsRendition(path)) {
+		m_renditionChecked.insert(path);
+		return;
+	}
+
+	m_renditionJobs.insert(path);
+	m_renditionPool.start([this, path, target]() {
+		const bool written = FffAssetRendition::writeRendition(path, target);
+		QMetaObject::invokeMethod(
+			this, [this, path, written]() { renditionFinished(path, written); }, Qt::QueuedConnection);
+	});
+}
+
+void FffHttpServer::renditionFinished(const QString &path, bool written)
+{
+	m_renditionJobs.remove(path);
+	m_renditionChecked.insert(path);
+	if (!written)
+		obs_log(LOG_WARNING, "could not shrink %s; serving it at full size", path.toUtf8().constData());
+
+	const QList<QPointer<QTcpSocket>> waiting = m_waitingRenditions.take(path);
+	if (waiting.isEmpty())
+		return;
+	const std::optional<QByteArray> bytes = cardBytes(path);
+	for (const QPointer<QTcpSocket> &socket : waiting) {
+		if (!socket || !m_conns.contains(socket))
+			continue;
+		if (bytes)
+			send(socket, 200, "image/png", *bytes, "public, max-age=31536000, immutable");
+		else
+			send(socket, 404, "text/plain; charset=utf-8", "no asset");
+	}
 }
