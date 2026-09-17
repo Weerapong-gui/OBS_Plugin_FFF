@@ -319,7 +319,10 @@ current macOS SDKs no longer ship AGL.
 top tools stay pinned while the page scrolls, flag/status/artwork controls are
 disabled rather than hidden so the canvas never moves, the grid tab rests in
 BOTTOM BAR, the last side tab survives a reload, the template stage is fitted
-once its tab shows, and a 900px window has no horizontal scroll.
+once its tab shows, and a 900px window has no horizontal scroll. Since Task 10
+it also covers on-air status and the editing warning, the two-step "reset all"
+button (the first press sends nothing, arming expires after 3 s, and changing
+tab disarms it), and the revoked-key banner replacing the connection warning.
 
 ```sh
 NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/monitor-ui.cjs
