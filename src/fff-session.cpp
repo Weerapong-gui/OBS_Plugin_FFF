@@ -641,6 +641,7 @@ QString FffSession::assetPath(const FffPresident &president, const QString &kind
 	const QString name = kind == QLatin1String("card")          ? president.card
 			     : kind == QLatin1String("bottomBar")   ? president.bottomBar
 			     : kind == QLatin1String("logo")        ? president.logo
+			     : kind == QLatin1String("logo2")       ? president.logo2
 			     : kind == QLatin1String("qualified")   ? president.qualified
 			     : kind == QLatin1String("unqualified") ? president.unqualified
 			     : kind == QLatin1String("waiting")     ? president.waiting
@@ -678,9 +679,9 @@ QStringList FffSession::assetPaths() const
 {
 	QStringList paths;
 	for (const FffPresident &president : m_presidents) {
-		for (const QString &kind :
-		     {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
-		      QStringLiteral("qualified"), QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
+		for (const QString &kind : {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
+					    QStringLiteral("logo2"), QStringLiteral("qualified"),
+					    QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
 			const QString path = assetPath(president, kind);
 			if (!path.isEmpty())
 				paths.append(path);
@@ -723,10 +724,10 @@ QString FffSession::importCard(const QString &path, const QString &id)
 
 QString FffSession::storeAsset(const QByteArray &png, const QString &kind)
 {
-	static const QStringList kinds = {QStringLiteral("card"),      QStringLiteral("bottomBar"),
-					  QStringLiteral("logo"),      QStringLiteral("cover"),
-					  QStringLiteral("qualified"), QStringLiteral("unqualified"),
-					  QStringLiteral("waiting")};
+	static const QStringList kinds = {QStringLiteral("card"),        QStringLiteral("bottomBar"),
+					  QStringLiteral("logo"),        QStringLiteral("logo2"),
+					  QStringLiteral("cover"),       QStringLiteral("qualified"),
+					  QStringLiteral("unqualified"), QStringLiteral("waiting")};
 	if (!kinds.contains(kind))
 		return QString();
 	// Only real PNGs get in, whether they arrive from the file picker or over
@@ -802,6 +803,23 @@ bool FffSession::setLogoPresident(const QString &id)
 	return true;
 }
 
+bool FffSession::setLogoRound(int round)
+{
+	if (round != 1 && round != 2)
+		return false;
+	if (m_logoRound == round)
+		return true;
+	const auto previous = m_logoRound;
+	m_logoRound = round;
+	if (!save()) {
+		m_logoRound = previous;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
 void FffSession::load()
 {
 	const QString path = QDir(configDir()).filePath(QStringLiteral("session.json"));
@@ -831,6 +849,7 @@ void FffSession::load()
 		president.card = entry.value(QStringLiteral("card")).toString();
 		president.bottomBar = entry.value(QStringLiteral("bottomBar")).toString();
 		president.logo = entry.value(QStringLiteral("logo")).toString();
+		president.logo2 = entry.value(QStringLiteral("logo2")).toString();
 		president.qualified = entry.value(QStringLiteral("qualified")).toString();
 		president.unqualified = entry.value(QStringLiteral("unqualified")).toString();
 		president.waiting = entry.value(QStringLiteral("waiting")).toString();
@@ -862,6 +881,9 @@ void FffSession::load()
 	m_cover = bottom.value(QStringLiteral("cover")).toString();
 	if (QFileInfo(m_cover).fileName() != m_cover)
 		m_cover.clear();
+	m_logoRound = bottom.value(QStringLiteral("logoRound")).toInt(1);
+	if (m_logoRound != 1 && m_logoRound != 2)
+		m_logoRound = 1;
 	m_logoPresidentId = bottom.value(QStringLiteral("logoPresidentId")).toString();
 	if (indexOf(m_logoPresidentId) < 0)
 		m_logoPresidentId.clear();
@@ -963,6 +985,7 @@ bool FffSession::save() const
 		entry.insert(QStringLiteral("pin"), president.pin);
 		entry.insert(QStringLiteral("bottomBar"), president.bottomBar);
 		entry.insert(QStringLiteral("logo"), president.logo);
+		entry.insert(QStringLiteral("logo2"), president.logo2);
 		entry.insert(QStringLiteral("qualified"), president.qualified);
 		entry.insert(QStringLiteral("unqualified"), president.unqualified);
 		entry.insert(QStringLiteral("waiting"), president.waiting);
@@ -1040,7 +1063,13 @@ QByteArray FffSession::overlayStateJson() const
 		entry.insert(QStringLiteral("school"), president.school);
 		entry.insert(QStringLiteral("cardUrl"), cardUrl(president));
 		entry.insert(QStringLiteral("bottomBarUrl"), assetUrl(president, QStringLiteral("bottomBar")));
-		entry.insert(QStringLiteral("logoUrl"), assetUrl(president, QStringLiteral("logo")));
+		// The round on air picks the centre logo; both are named so the
+		// overlay can fetch the other round before the operator switches.
+		const QString logoRound1 = assetUrl(president, QStringLiteral("logo"));
+		const QString logoRound2 = assetUrl(president, QStringLiteral("logo2"));
+		entry.insert(QStringLiteral("logoUrl"), m_logoRound == 2 ? logoRound2 : logoRound1);
+		entry.insert(QStringLiteral("logoRound1Url"), logoRound1);
+		entry.insert(QStringLiteral("logoRound2Url"), logoRound2);
 		entry.insert(QStringLiteral("status"), statusName(president.status));
 		entry.insert(QStringLiteral("statusUrl"), statusUrl(president));
 		// Per-status URLs so the monitor can say which statuses already have
@@ -1121,6 +1150,7 @@ QJsonObject FffSession::bottomBarJson() const
 {
 	QJsonObject root;
 	root.insert(QStringLiteral("logoPresidentId"), m_logoPresidentId);
+	root.insert(QStringLiteral("logoRound"), m_logoRound);
 	root.insert(QStringLiteral("cover"), m_cover);
 	root.insert(QStringLiteral("coverUrl"), coverUrl());
 	QJsonObject layout;

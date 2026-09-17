@@ -443,8 +443,8 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		for (const QString &kind :
-		     {QStringLiteral("bottomBar"), QStringLiteral("logo"), QStringLiteral("qualified"),
-		      QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
+		     {QStringLiteral("bottomBar"), QStringLiteral("logo"), QStringLiteral("logo2"),
+		      QStringLiteral("qualified"), QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
 			const QString prefix = QStringLiteral("/api/") + kind + QStringLiteral("/");
 			if (path.startsWith(prefix)) {
 				sendCard(socket, path.mid(prefix.size()), kind);

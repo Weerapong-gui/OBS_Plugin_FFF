@@ -76,3 +76,16 @@ add_executable(
 target_include_directories(asset-rendition-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
 target_link_libraries(asset-rendition-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
 add_test(NAME asset-rendition-tests COMMAND asset-rendition-tests)
+
+add_executable(
+  logo-round-tests
+  logo-round-tests.cpp
+  obs-stubs.cpp
+  ../src/fff-session.cpp
+  ../src/fff-http-server.cpp
+  ../src/fff-monitor-access.cpp
+  ../src/fff-asset-rendition.cpp
+)
+target_include_directories(logo-round-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
+target_link_libraries(logo-round-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
+add_test(NAME logo-round-tests COMMAND logo-round-tests)

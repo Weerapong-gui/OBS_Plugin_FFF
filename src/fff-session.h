@@ -30,6 +30,8 @@ struct FffPresident {
 	QString pin;
 	QString bottomBar;
 	QString logo;
+	// Round 2 of the centre logo; `logo` is round 1.
+	QString logo2;
 	// One finished PNG per status. A status with no artwork falls back to the
 	// card, so a roster built before these existed still goes on air.
 	QString qualified;
@@ -126,6 +128,10 @@ public:
 	// can put the same votes back up a moment later.
 	bool hideDisplay();
 	bool setLogoPresident(const QString &id);
+	// Which set of centre-logo artwork goes on air: 1 or 2. Independent of
+	// the vote round.
+	int logoRound() const { return m_logoRound; }
+	bool setLogoRound(int round);
 	QString displayMode() const { return m_displayMode; }
 	QString logoPresidentId() const { return m_logoPresidentId; }
 	QString importAsset(const QString &sourcePath, const QString &presidentId, const QString &kind);
@@ -182,6 +188,7 @@ private:
 	QJsonObject m_bottomTemplate;
 	QString m_displayMode = QStringLiteral("scoreboard");
 	QString m_logoPresidentId;
+	int m_logoRound = 1;
 	QString m_cover;
 
 	QVector<FffPresident> m_presidents;

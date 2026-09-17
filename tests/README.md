@@ -341,3 +341,12 @@ decodes. Over loopback, an oversized asset is served as its rendition, a small
 one byte for byte, a new cover is shrunk before anything requests it, and every
 asset URL carries `fit=1920x1080` so a browser cache holding full-size bytes is
 never reused.
+
+## Centre logo rounds
+
+`logo-round-tests` covers Round 1/Round 2 centre-logo artwork. `logo2` and
+`bottomBar.logoRound` persist, an unknown round loads as 1, a failed save keeps
+the round, and `clearRound()` never touches it. Overlay state puts the chosen
+round's URL in `logoUrl` (empty when that school has no Round 2 PNG) and names
+both rounds in `logoRound1Url`/`logoRound2Url`. `GET /api/logo2/<id>` serves the
+artwork through the same shrink-to-stream renditions as every other asset.
