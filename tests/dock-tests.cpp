@@ -1,10 +1,12 @@
 // Dock panels driven offscreen against a real session and server.
 #include "fff-dock-live.h"
+#include "fff-dock-roster.h"
 #include "fff-dock-ui.h"
 #include "fff-http-server.h"
 #include "fff-session.h"
 #include "obs-stubs.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QComboBox>
 #include <QDir>
@@ -13,7 +15,9 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QStringList>
+#include <QTableWidget>
 #include <QTemporaryDir>
+#include <QToolButton>
 
 static void check(bool ok, const char *message)
 {
@@ -125,6 +129,72 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	      "a vote keeps the logo choice");
 }
 
+static void testRosterTab(FffSession &session)
+{
+	FffRosterTab roster(&session);
+	QStringList errors;
+	QObject::connect(&roster, &FffRosterTab::errorRaised, [&](const QString &message) { errors.append(message); });
+
+	check(roster.table()->rowCount() == 2 && roster.table()->columnCount() == 6,
+	      "the roster lists everyone in six columns");
+	check(roster.table()->item(0, 3)->text() == QStringLiteral("—"), "missing artwork reads as a dash");
+	check(!roster.pngButton()->isEnabled() && !roster.moreButton()->isEnabled() &&
+		      roster.pngButton()->toolTip() == QStringLiteral("เลือกนายกในตารางก่อน"),
+	      "row actions wait for a selection and say so");
+
+	roster.selectPresident(QStringLiteral("a"));
+	check(roster.selectedPresidentId() == QLatin1String("a") && roster.pngButton()->isEnabled() &&
+		      roster.moreButton()->isEnabled(),
+	      "selecting a row enables its actions");
+	check(roster.chooseAction(QStringLiteral("bottomBar"))->isEnabled() &&
+		      !roster.clearAction(QStringLiteral("bottomBar"))->isEnabled(),
+	      "nothing to clear before artwork exists");
+
+	FffPresident withBar = *session.presidentById(QStringLiteral("a"));
+	withBar.bottomBar = QStringLiteral("bottomBar-test.png");
+	check(session.updatePresident(withBar), "give the president a BOTTOM BAR");
+	roster.refresh();
+	check(roster.selectedPresidentId() == QLatin1String("a") &&
+		      roster.clearAction(QStringLiteral("bottomBar"))->isEnabled() &&
+		      roster.table()->item(0, 4)->text() == QStringLiteral("✓"),
+	      "existing artwork shows a tick and can be cleared");
+	roster.clearAction(QStringLiteral("bottomBar"))->trigger();
+	check(session.presidentById(QStringLiteral("a"))->bottomBar.isEmpty() &&
+		      roster.table()->item(0, 4)->text() == QStringLiteral("—"),
+	      "clearing artwork needs no confirmation");
+
+	const QString pinBefore = session.presidentById(QStringLiteral("a"))->pin;
+	asked.clear();
+	answer = false;
+	roster.regeneratePinAction()->trigger();
+	check(asked == QStringList{QStringLiteral("สุ่ม PIN ใหม่")} &&
+		      session.presidentById(QStringLiteral("a"))->pin == pinBefore,
+	      "a declined PIN change keeps the PIN");
+	answer = true;
+	roster.regeneratePinAction()->trigger();
+	check(session.presidentById(QStringLiteral("a"))->pin != pinBefore, "a confirmed PIN change replaces it");
+
+	asked.clear();
+	answer = false;
+	roster.removeAction()->trigger();
+	check(asked == QStringList{QStringLiteral("ลบนายก")} && session.presidents().size() == 2,
+	      "a declined removal keeps the president");
+
+	roster.addButton()->click();
+	const QString added = session.presidents().last().id;
+	check(session.presidents().size() == 3 && roster.table()->rowCount() == 3 &&
+		      roster.selectedPresidentId() == added,
+	      "add creates and selects a president");
+	answer = true;
+	roster.removeAction()->trigger();
+	check(session.presidents().size() == 2 && roster.table()->rowCount() == 2 && !session.presidentById(added),
+	      "a confirmed removal deletes the president");
+
+	roster.table()->item(1, 0)->setText(QStringLiteral("สองใหม่"));
+	check(session.presidentById(QStringLiteral("b"))->name == QStringLiteral("สองใหม่"), "editing a name saves it");
+	check(errors.isEmpty(), "no roster errors on the happy path");
+}
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -145,6 +215,7 @@ int main(int argc, char **argv)
 	check(server.start(0, &error), "HTTP starts");
 
 	testLivePanel(session, server);
-	qInfo("PASS: dock live panel");
+	testRosterTab(session);
+	qInfo("PASS: dock live panel and roster tab");
 	return 0;
 }
