@@ -30,8 +30,9 @@ inline QString fffSaveErrorText()
 	return QStringLiteral("บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว กรุณาตรวจสอบพื้นที่และสิทธิ์เขียนไฟล์");
 }
 
-// The two mode buttons sit side by side, so "on air" has to be unmistakable
-// against its sibling rather than a faint default check mark.
+// The live bar's buttons sit side by side, so a checked one ("on air") has to
+// be unmistakable against its sibling rather than a faint default check
+// mark; non-checkable buttons just get the same bordered rounded rectangle.
 inline QString fffModeButtonStyle()
 {
 	return QStringLiteral(

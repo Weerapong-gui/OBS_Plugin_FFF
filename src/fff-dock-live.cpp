@@ -80,7 +80,7 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 	m_newRound->setToolTip(QStringLiteral("ล้างผลโหวตทุกคนแล้วขึ้นรอบถัดไป รายชื่อ PNG และ PIN ยังอยู่ครบ"));
 	for (QPushButton *button : {m_hide, m_newRound}) {
 		button->setMinimumHeight(36);
-		button->setStyleSheet(QStringLiteral("QPushButton { border-radius: 6px; padding: 6px 12px; }"));
+		button->setStyleSheet(fffModeButtonStyle());
 		actions->addWidget(button);
 	}
 	layout->addLayout(actions);
