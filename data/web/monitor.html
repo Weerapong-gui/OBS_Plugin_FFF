@@ -172,6 +172,9 @@ const symmetry = document.getElementById("symmetry");
 const selection = document.getElementById("selection");
 const saveStatus = document.getElementById("saveStatus");
 const cardControls = document.getElementById("cardControls");
+const roundStatus = document.getElementById("roundStatus");
+const airWarning = document.getElementById("airWarning");
+const accessDenied = document.getElementById("accessDenied");
 
 let sourceState = null;
 let editMode = "scoreboard";
@@ -371,6 +374,7 @@ function commitDraft() {
 }
 
 function select(target) {
+  resetAllConfirm.disarm();
   commitDraft();
   selected = target;
   selection.value = target;
@@ -512,11 +516,12 @@ document.getElementById("reset").onclick = () => {
   draft = null;
   queue({ target: selected, reset: true });
 };
-document.getElementById("resetAll").onclick = () => {
+// Throwing away every placement asks twice.
+const resetAllConfirm = armConfirm(document.getElementById("resetAll"), () => {
   draft = null;
   for (const [key, request] of pending) if (request.mode === editMode) pending.delete(key);
   queue({ target: "all", reset: true });
-};
+}, { timeoutMs: 3000, armedLabel: "กดอีกครั้งเพื่อรีเซ็ตทั้งหมด" });
 
 for (const button of document.querySelectorAll("[data-vote]")) {
   button.onclick = async () => {
@@ -617,9 +622,7 @@ function render(incoming) {
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
 
-  statusEl.textContent = revealed
-    ? "ขึ้นจอแล้ว · " + (incoming.displayMode === "bottomBar" ? "BOTTOM BAR" : "Show Status")
-    : `ส่งแล้ว ${state.voted}/${state.total} · ยังไม่ขึ้นจอ`;
+  updateAirStatus({ status: statusEl, round: roundStatus, warning: airWarning }, incoming, editMode);
 
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
@@ -648,10 +651,11 @@ function render(incoming) {
 }
 
 // Tabs only choose which tools are in view; nothing here touches the board.
-const sideTabs = createTabs(document.querySelector(".side-panel [role=tablist]"), { fallback: "position" });
+const sideTabs = createTabs(document.querySelector(".side-panel [role=tablist]"), { fallback: "position", onShow: () => resetAllConfirm.disarm() });
 // Arranging the card grid is a Show Status job, so its tab rests in BOTTOM BAR.
 document.getElementById("editMode").addEventListener("change", event => {
   if (event.target.name !== "editMode") return;
+  resetAllConfirm.disarm();
   endDrag(); commitDraft(); gridDrafts = null;
   editMode = event.target.value; selected = "";
   sideTabs.setDisabled("grid", editMode === "bottomBar", "ใช้ได้เฉพาะ Show Status");
@@ -671,10 +675,11 @@ setInterval(flush, 3000);
 document.fonts.ready.then(apply);
 
 const stream = new EventSource("/api/events/overlay");
-stream.onopen = () => warn.classList.add("hidden");
-stream.onerror = () => warn.classList.remove("hidden");
+stream.onopen = () => { warn.classList.add("hidden"); accessDenied.classList.add("hidden"); };
+stream.onerror = () => { warn.classList.remove("hidden"); checkAccess({ warn: warn, denied: accessDenied }); };
 stream.onmessage = (event) => {
   warn.classList.add("hidden");
+  accessDenied.classList.add("hidden");
   render(JSON.parse(event.data));
 };
 </script>

@@ -123,8 +123,48 @@ async function main() {
       "no horizontal scroll at 900px");
     await page.setViewport({ width: 1440, height: 900 });
 
+    // On air: status in words and colour, warning only while editing the aired mode.
+    state.phase = "revealed"; state.displayMode = "bottomBar"; push();
+    await page.waitForFunction(() => document.getElementById("status").textContent.includes("ออกอากาศ"));
+    assert.equal(await page.$eval("#status", (el) => el.textContent), "● ออกอากาศ · BOTTOM BAR");
+    assert.equal(await page.$eval("#status", (el) => el.dataset.air), "on");
+    assert.equal(await page.$eval("#roundStatus", (el) => el.textContent), "รอบ 2 · โหวตแล้ว 1/3");
+    assert.equal(await page.$eval("#airWarning", (el) => el.hidden), true,
+      "editing Show Status while BOTTOM BAR is on air is safe");
+    await setEditMode(page, "bottomBar");
+    assert.equal(await page.$eval("#airWarning", (el) => el.hidden), false, "editing the aired mode warns");
+    state.phase = "collecting"; push();
+    await page.waitForFunction(() => document.getElementById("airWarning").hidden);
+    assert.equal(await page.$eval("#status", (el) => el.textContent), "○ จอว่าง");
+    await setEditMode(page, "scoreboard");
+
+    // Reset all asks twice and forgets a lone press.
+    await page.click("#tab-position");
+    layoutRequests = [];
+    await page.click("#resetAll");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(layoutRequests.length, 0, "the first press sends nothing");
+    assert.equal(await page.$eval("#resetAll", (el) => el.textContent), "กดอีกครั้งเพื่อรีเซ็ตทั้งหมด");
+    await page.click("#resetAll");
+    await page.waitForFunction(() => pending.size === 0 && !saving);
+    assert.deepEqual(layoutRequests.map((request) => request.target), ["all"], "the second press resets");
+    await page.click("#resetAll");
+    await new Promise((resolve) => setTimeout(resolve, 3300));
+    assert.equal(await page.$eval("#resetAll", (el) => el.textContent), "รีเซ็ตทั้งหมด", "arming expires");
+    await page.click("#resetAll");
+    await page.click("#tab-grid");
+    await page.click("#tab-position");
+    assert.equal(await page.$eval("#resetAll", (el) => el.textContent), "รีเซ็ตทั้งหมด", "changing tab disarms");
+
+    // A revoked key is told apart from a dropped connection.
+    accessStatus = 403;
+    for (const res of streams) res.destroy();
+    await page.waitForFunction(() => !document.getElementById("accessDenied").classList.contains("hidden"));
+    assert.equal(await page.$eval("#warn", (el) => el.classList.contains("hidden")), true,
+      "a revoked key replaces the connection warning");
+
     assert.deepEqual(errors, []);
-    console.log("PASS: pinned tools, side tabs, remembered tab, card controls stay put");
+    console.log("PASS: pinned tools, side tabs, card controls, on-air warning, two-step reset, revoked key");
   } finally {
     await browser.close();
     server.close();

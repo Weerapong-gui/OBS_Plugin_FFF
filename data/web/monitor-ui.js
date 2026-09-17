@@ -1,6 +1,6 @@
-// Page furniture for the monitor: side tabs now; the on-air warning, two-step
-// confirmation and access check join in the next change. Nothing here edits
-// the board, so monitor.html stays the single owner of layout state.
+// Page furniture for the monitor: side tabs, two-step confirmation, the on-air
+// status and telling a revoked key apart from a dropped connection. Nothing
+// here edits the board, so monitor.html stays the single owner of layout state.
 (function () {
   const TAB_KEY = "fff.monitor.tab";
 
@@ -59,5 +59,61 @@
     const stored = storedTab();
     if (!(stored && api.show(stored, false))) api.show(opts.fallback || nameOf(tabs[0]), false);
     return api;
+  };
+
+  // A destructive button asks twice in the page itself: a browser confirm()
+  // may never appear inside an OBS custom dock.
+  window.armConfirm = function (button, onConfirm, options) {
+    const opts = options || {};
+    const timeoutMs = opts.timeoutMs || 3000;
+    const label = button.textContent;
+    let timer = null;
+    const control = {
+      get armed() { return timer !== null; },
+      disarm() {
+        if (timer === null) return;
+        clearTimeout(timer);
+        timer = null;
+        button.textContent = label;
+        button.classList.remove("confirm-armed");
+      }
+    };
+    button.addEventListener("click", () => {
+      if (timer === null) {
+        button.textContent = opts.armedLabel || "กดอีกครั้งเพื่อยืนยัน";
+        button.classList.add("confirm-armed");
+        timer = setTimeout(() => control.disarm(), timeoutMs);
+        return;
+      }
+      control.disarm();
+      onConfirm();
+    });
+    return control;
+  };
+
+  // What the stream shows, in words and colour, plus a warning when the mode
+  // being edited is the one viewers are watching.
+  window.updateAirStatus = function (elements, incoming, editMode) {
+    const revealed = incoming.phase === "revealed";
+    const aired = incoming.displayMode === "bottomBar" ? "BOTTOM BAR" : "Show Status";
+    elements.status.textContent = revealed ? "● ออกอากาศ · " + aired : "○ จอว่าง";
+    elements.status.dataset.air = revealed ? "on" : "blank";
+    elements.round.textContent = `รอบ ${incoming.round ?? 1} · โหวตแล้ว ${incoming.voted ?? 0}/${incoming.total ?? 0}`;
+    elements.warning.hidden = !(revealed && (incoming.displayMode || "scoreboard") === editMode);
+  };
+
+  // EventSource cannot tell a refused key from a dropped network, so ask.
+  window.checkAccess = async function (elements) {
+    try {
+      const res = await fetch("/api/monitor/access", { cache: "no-store" });
+      const revoked = res.status === 403;
+      elements.denied.classList.toggle("hidden", !revoked);
+      elements.warn.classList.toggle("hidden", revoked);
+      return !revoked && res.ok;
+    } catch (err) {
+      elements.denied.classList.add("hidden");
+      elements.warn.classList.remove("hidden");
+      return false;
+    }
   };
 })();
