@@ -368,6 +368,10 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 	route(socket, method, path, query.queryItemValue(QStringLiteral("token")), body);
 }
 
+// Every route below that is not meant for the whole LAN must be listed in
+// FffMonitorAccess::classify() (src/fff-monitor-access.cpp) as MonitorApi or
+// LocalOnly — its default is Endpoint::Public, so a route left out of that
+// switch is open to anyone on the LAN, key or no key.
 void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QString &path, const QString &token,
 			  const QByteArray &body)
 {
