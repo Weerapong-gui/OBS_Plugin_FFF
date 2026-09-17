@@ -13,6 +13,8 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <functional>
+
 static void check(bool ok, const char *message)
 {
 	if (!ok)
@@ -80,6 +82,18 @@ static QByteArray bodyOf(const QByteArray &response)
 {
 	const qsizetype end = response.indexOf("\r\n\r\n");
 	return end < 0 ? QByteArray() : response.mid(end + 4);
+}
+
+static bool waitFor(const std::function<bool()> &condition, int timeoutMs = 5000)
+{
+	QElapsedTimer clock;
+	clock.start();
+	while (!condition() && clock.elapsed() < timeoutMs) {
+		QEventLoop loop;
+		QTimer::singleShot(10, &loop, &QEventLoop::quit);
+		loop.exec();
+	}
+	return condition();
 }
 
 static void testSession(FffSession &session, const QTemporaryDir &temp)
@@ -205,6 +219,36 @@ static void testServer(FffSession &session, FffHttpServer &server)
 	check(session.setMonitorLanEnabled(false), "switch LAN monitor off again");
 	check(statusOf(call("GET", host, "/api/monitor/access", cookie)) == 403, "switching off retires the cookie");
 	check(session.setMonitorLanEnabled(true), "leave LAN monitor on");
+
+	// Connections admitted under the old rules are cut; this machine's screens stay.
+	QTcpSocket remote;
+	QTcpSocket screen;
+	QByteArray remoteData;
+	QByteArray screenData;
+	QObject::connect(&remote, &QTcpSocket::readyRead, [&]() { remoteData += remote.readAll(); });
+	QObject::connect(&screen, &QTcpSocket::readyRead, [&]() { screenData += screen.readAll(); });
+	remote.connectToHost(host, port);
+	screen.connectToHost(local, port);
+	check(waitFor([&]() {
+		      return remote.state() == QAbstractSocket::ConnectedState &&
+			     screen.state() == QAbstractSocket::ConnectedState;
+	      }),
+	      "open event streams");
+	remote.write(httpRequest("GET", host, "/api/events/overlay", cookie));
+	screen.write(httpRequest("GET", local, "/api/events/overlay"));
+	check(waitFor([&]() { return remoteData.contains("data: ") && screenData.contains("data: "); }),
+	      "both streams receive state");
+	check(server.remoteMonitorClientCount() == 1 && server.overlayClientCount() == 1,
+	      "LAN monitors are counted apart from local screens");
+
+	check(session.regenerateMonitorKey(), "regenerate the key");
+	check(waitFor([&]() { return remote.state() == QAbstractSocket::UnconnectedState; }),
+	      "a new key cuts the LAN monitor");
+	check(server.remoteMonitorClientCount() == 0 && screen.state() == QAbstractSocket::ConnectedState &&
+		      server.overlayClientCount() == 1,
+	      "this machine's screen stays connected");
+	check(statusOf(call("GET", host, "/api/monitor/access", cookie)) == 403, "the old cookie is refused");
+	screen.disconnectFromHost();
 }
 
 int main(int argc, char **argv)

@@ -44,6 +44,8 @@ public:
 
 	int phoneClientCount() const;
 	int overlayClientCount() const;
+	// Monitors opened from another machine with the LAN key.
+	int remoteMonitorClientCount() const;
 
 	static QStringList lanAddresses();
 
@@ -55,6 +57,9 @@ private:
 		QByteArray buffer;
 		bool sse = false;
 		bool overlay = false;
+		// Opened from another machine with the monitor key; cut when the
+		// switch or the key changes.
+		bool remoteMonitor = false;
 		// A reply is already on its way, possibly after a delay. Anything else
 		// the client sends is read and dropped so it cannot be answered twice.
 		bool closing = false;
@@ -72,7 +77,8 @@ private:
 	void handleOperatorVote(QTcpSocket *socket, const QByteArray &body);
 	void handleLayout(QTcpSocket *socket, const QByteArray &body);
 	void handleLayer(QTcpSocket *socket, const QByteArray &body);
-	void startSse(QTcpSocket *socket, const QString &token, bool overlay);
+	void startSse(QTcpSocket *socket, const QString &token, bool overlay, bool remoteMonitor = false);
+	void dropRemoteMonitors();
 	void pushState();
 	void sendHeartbeat();
 
@@ -87,6 +93,8 @@ private:
 
 	// Query of the request being routed; the upload reads presidentId and kind.
 	QUrlQuery m_query;
+	// True while routing a request from another machine that holds the monitor key.
+	bool m_remoteRequest = false;
 	FffSession *m_session = nullptr;
 	QTcpServer *m_server = nullptr;
 	QTimer *m_heartbeat = nullptr;

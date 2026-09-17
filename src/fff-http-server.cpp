@@ -133,6 +133,8 @@ FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(par
 		}
 		pushState();
 	});
+
+	connect(m_session, &FffSession::monitorAccessChanged, this, &FffHttpServer::dropRemoteMonitors);
 }
 
 FffHttpServer::~FffHttpServer()
@@ -206,10 +208,37 @@ int FffHttpServer::overlayClientCount() const
 {
 	int count = 0;
 	for (const Conn &conn : m_conns) {
-		if (conn.sse && conn.overlay)
+		if (conn.sse && conn.overlay && !conn.remoteMonitor)
 			++count;
 	}
 	return count;
+}
+
+int FffHttpServer::remoteMonitorClientCount() const
+{
+	int count = 0;
+	for (const Conn &conn : m_conns) {
+		if (conn.sse && conn.remoteMonitor)
+			++count;
+	}
+	return count;
+}
+
+void FffHttpServer::dropRemoteMonitors()
+{
+	QList<QTcpSocket *> sockets;
+	for (auto it = m_conns.cbegin(); it != m_conns.cend(); ++it) {
+		if (it.value().remoteMonitor)
+			sockets.append(it.key());
+	}
+	for (QTcpSocket *socket : sockets) {
+		m_conns.remove(socket);
+		socket->disconnect(this);
+		socket->close();
+		socket->deleteLater();
+	}
+	if (!sockets.isEmpty())
+		emit clientsChanged();
 }
 
 QStringList FffHttpServer::lanAddresses()
@@ -331,6 +360,7 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 
 	const QByteArray body = conn.buffer.mid(headerEnd + 4, contentLength);
 	m_query = query;
+	m_remoteRequest = !access.loopback && access.endpoint == FffMonitorAccess::Endpoint::MonitorApi;
 	route(socket, method, path, query.queryItemValue(QStringLiteral("token")), body);
 }
 
@@ -381,7 +411,7 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		if (path == QLatin1String("/api/events/overlay")) {
 			// Every flag before the reveal: this machine, or a LAN monitor
 			// holding the current key (see readFrom()).
-			startSse(socket, QString(), true);
+			startSse(socket, QString(), true, m_remoteRequest);
 			return;
 		}
 		if (path == QLatin1String("/api/events")) {
@@ -698,7 +728,7 @@ void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
 	sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 }
 
-void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay)
+void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay, bool remoteMonitor)
 {
 	auto it = m_conns.find(socket);
 	if (it == m_conns.end())
@@ -707,6 +737,7 @@ void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool over
 	Conn &conn = it.value();
 	conn.sse = true;
 	conn.overlay = overlay;
+	conn.remoteMonitor = remoteMonitor;
 	conn.token = token;
 	conn.buffer.clear();
 
