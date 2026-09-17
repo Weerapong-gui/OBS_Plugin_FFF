@@ -85,7 +85,6 @@ FffDock::FffDock()
 	if (!started)
 		m_settings->setStartError(QStringLiteral("เปิดพอร์ต %1 ไม่ได้: %2").arg(m_session->port()).arg(startError));
 
-	connect(liveTab, &FffLiveTab::errorRaised, live, &FffLivePanel::showError);
 	connect(roster, &FffRosterTab::errorRaised, live, &FffLivePanel::showError);
 	connect(m_settings, &FffSettingsTab::errorRaised, live, &FffLivePanel::showError);
 	connect(m_session, &FffSession::changed, this, [this]() { refreshAttention(); });

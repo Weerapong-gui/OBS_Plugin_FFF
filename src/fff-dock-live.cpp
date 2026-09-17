@@ -34,6 +34,34 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 	m_summary->setWordWrap(true);
 	layout->addWidget(m_summary);
 
+	// The centre logo comes first: which round's artwork, then whose.
+	auto *rounds = new QHBoxLayout();
+	rounds->addWidget(new QLabel(QStringLiteral("โลโก้กลาง"), this));
+	m_roundOne = new QPushButton(QStringLiteral("Round 1"), this);
+	m_roundTwo = new QPushButton(QStringLiteral("Round 2"), this);
+	for (QPushButton *button : {m_roundOne, m_roundTwo}) {
+		button->setCheckable(true);
+		button->setMinimumHeight(36);
+		button->setStyleSheet(fffModeButtonStyle());
+		rounds->addWidget(button, 1);
+	}
+	layout->addLayout(rounds);
+
+	auto *school = new QHBoxLayout();
+	school->addWidget(new QLabel(QStringLiteral("สำนัก"), this));
+	m_logo = new QComboBox(this);
+	// A long school name must not widen the whole dock.
+	m_logo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	m_logo->setMinimumContentsLength(8);
+	school->addWidget(m_logo, 1);
+	layout->addLayout(school);
+
+	m_logoWarning = new QLabel(this);
+	m_logoWarning->setWordWrap(true);
+	m_logoWarning->setStyleSheet(QStringLiteral("color:%1;").arg(QLatin1String(FffColor::kAmber)));
+	m_logoWarning->hide();
+	layout->addWidget(m_logoWarning);
+
 	auto *modes = new QHBoxLayout();
 	m_scoreboard = new QPushButton(QStringLiteral("Show Status"), this);
 	m_bottomBar = new QPushButton(QStringLiteral("BOTTOM BAR"), this);
@@ -52,6 +80,7 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 	m_newRound->setToolTip(QStringLiteral("ล้างผลโหวตทุกคนแล้วขึ้นรอบถัดไป รายชื่อ PNG และ PIN ยังอยู่ครบ"));
 	for (QPushButton *button : {m_hide, m_newRound}) {
 		button->setMinimumHeight(36);
+		button->setStyleSheet(QStringLiteral("QPushButton { border-radius: 6px; padding: 6px 12px; }"));
 		actions->addWidget(button);
 	}
 	layout->addLayout(actions);
@@ -62,6 +91,15 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 	m_error->hide();
 	layout->addWidget(m_error);
 
+	connect(m_roundOne, &QPushButton::clicked, this, [this]() { pressRound(1); });
+	connect(m_roundTwo, &QPushButton::clicked, this, [this]() { pressRound(2); });
+	connect(m_logo, &QComboBox::currentIndexChanged, this, [this](int) {
+		if (!m_session->setLogoPresident(m_logo->currentData().toString())) {
+			showError(fffSaveErrorText());
+			m_logoSignature.clear();
+			refresh();
+		}
+	});
 	connect(m_scoreboard, &QPushButton::clicked, this, [this]() { pressMode(QStringLiteral("scoreboard")); });
 	connect(m_bottomBar, &QPushButton::clicked, this, [this]() { pressMode(QStringLiteral("bottomBar")); });
 	connect(m_hide, &QPushButton::clicked, this, [this]() {
@@ -118,9 +156,39 @@ void FffLivePanel::refresh()
 	m_summary->setStyleSheet(
 		ready ? QStringLiteral("color:%1;font-weight:700;").arg(QLatin1String(FffColor::kGreen)) : QString());
 
+	const int logoRound = m_session->logoRound();
+	m_roundOne->setChecked(logoRound == 1);
+	m_roundTwo->setChecked(logoRound == 2);
+	refreshLogo();
+
 	m_scoreboard->setChecked(revealed && !bottomBar);
 	m_bottomBar->setChecked(revealed && bottomBar);
 	m_hide->setEnabled(revealed);
+}
+
+void FffLivePanel::refreshLogo()
+{
+	QStringList signature{m_session->logoPresidentId()};
+	for (const FffPresident &president : m_session->presidents())
+		signature << president.id << president.name << president.school;
+	const QString joined = signature.join(QChar(0x1f));
+	if (joined != m_logoSignature) {
+		m_logoSignature = joined;
+		const QSignalBlocker blocker(m_logo);
+		m_logo->clear();
+		m_logo->addItem(QStringLiteral("ไม่เลือกโลโก้"), QString());
+		for (const FffPresident &president : m_session->presidents())
+			m_logo->addItem(president.school.isEmpty() ? president.name : president.school, president.id);
+		m_logo->setCurrentIndex(qMax(0, m_logo->findData(m_session->logoPresidentId())));
+	}
+
+	// Round 2 without artwork leaves the centre empty on air, so say why here.
+	const FffPresident *president = m_session->presidentById(m_session->logoPresidentId());
+	const bool missing = m_session->logoRound() == 2 && president && president->logo2.isEmpty();
+	m_logoWarning->setText(missing ? QStringLiteral("⚠ %1 ยังไม่มี PNG ของ Round 2")
+						 .arg(president->school.isEmpty() ? president->name : president->school)
+				       : QString());
+	m_logoWarning->setVisible(missing);
 }
 
 void FffLivePanel::showError(const QString &message)
@@ -129,12 +197,20 @@ void FffLivePanel::showError(const QString &message)
 	m_error->setVisible(!message.isEmpty());
 }
 
+void FffLivePanel::pressRound(int round)
+{
+	if (!m_session->setLogoRound(round))
+		showError(fffSaveErrorText());
+	refresh();
+}
+
 void FffLivePanel::pressMode(const QString &mode)
 {
-	// Pressing the mode already on air changes nothing. Blanking the stream is
-	// its own button, so a double click can never take the board down.
+	// Each mode button is a toggle: the mode on air comes down, the other one
+	// goes straight up. ■ ซ่อนจอ still blanks whatever is showing.
 	const bool onAir = m_session->phase() == FffPhase::Revealed && m_session->displayMode() == mode;
-	if (!onAir && !m_session->showMode(mode))
+	const bool saved = onAir ? m_session->hideDisplay() : m_session->showMode(mode);
+	if (!saved)
 		showError(fffSaveErrorText());
 	refresh();
 }
@@ -159,40 +235,12 @@ FffLiveTab::FffLiveTab(FffSession *session, QWidget *parent) : QWidget(parent), 
 	auto *layout = new QVBoxLayout(this);
 	m_votes = new QListWidget(this);
 	layout->addWidget(m_votes, 1);
-
-	auto *logoRow = new QHBoxLayout();
-	logoRow->addWidget(new QLabel(QStringLiteral("โลโก้กลาง"), this));
-	m_logo = new QComboBox(this);
-	logoRow->addWidget(m_logo, 1);
-	layout->addLayout(logoRow);
-
-	connect(m_logo, &QComboBox::currentIndexChanged, this, [this](int) {
-		if (!m_session->setLogoPresident(m_logo->currentData().toString())) {
-			emit errorRaised(fffSaveErrorText());
-			m_logoSignature.clear();
-			refresh();
-		}
-	});
 	connect(m_session, &FffSession::changed, this, [this]() { refresh(); });
 	refresh();
 }
 
 void FffLiveTab::refresh()
 {
-	QStringList signature{m_session->logoPresidentId()};
-	for (const FffPresident &president : m_session->presidents())
-		signature << president.id << president.name << president.school;
-	const QString joined = signature.join(QChar(0x1f));
-	if (joined != m_logoSignature) {
-		m_logoSignature = joined;
-		const QSignalBlocker blocker(m_logo);
-		m_logo->clear();
-		m_logo->addItem(QStringLiteral("ไม่เลือกโลโก้"), QString());
-		for (const FffPresident &president : m_session->presidents())
-			m_logo->addItem(president.school.isEmpty() ? president.name : president.school, president.id);
-		m_logo->setCurrentIndex(qMax(0, m_logo->findData(m_session->logoPresidentId())));
-	}
-
 	m_votes->clear();
 	for (const FffPresident &president : m_session->presidents()) {
 		const FffVote vote = m_session->voteOf(president.id);

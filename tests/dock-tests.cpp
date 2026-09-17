@@ -82,13 +82,23 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	check(!panel.summary()->property("fffReady").toBool(), "the summary stops inviting once on air");
 
 	panel.bottomBarButton()->click();
-	check(session.phase() == FffPhase::Revealed && panel.bottomBarButton()->isChecked(),
-	      "pressing the aired mode again keeps it on air");
+	check(session.phase() == FffPhase::Collecting && !panel.bottomBarButton()->isChecked() &&
+		      panel.banner()->property("fffState").toString() == QLatin1String("blank"),
+	      "pressing the aired mode again takes it off air");
+	panel.bottomBarButton()->click();
+	check(session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("bottomBar"),
+	      "pressing it once more puts it back on air");
 
 	panel.scoreboardButton()->click();
 	check(session.displayMode() == QLatin1String("scoreboard") && panel.scoreboardButton()->isChecked() &&
 		      !panel.bottomBarButton()->isChecked(),
 	      "the other mode switches directly");
+	panel.scoreboardButton()->click();
+	check(session.phase() == FffPhase::Collecting && !panel.scoreboardButton()->isChecked(),
+	      "Show Status toggles off too");
+	panel.scoreboardButton()->click();
+	check(session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("scoreboard"),
+	      "and back on");
 
 	panel.hideButton()->click();
 	check(session.phase() == FffPhase::Collecting && !panel.hideButton()->isEnabled() &&
@@ -139,11 +149,46 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	check(live.votes()->count() == 2 && live.votes()->item(0)->text() == QStringLiteral("● เขียว · หนึ่ง") &&
 		      live.votes()->item(1)->text() == QStringLiteral("○ ยังไม่กด · สอง"),
 	      "the vote list names colour and president");
-	live.logo()->setCurrentIndex(live.logo()->findData(QStringLiteral("b")));
-	check(session.logoPresidentId() == QLatin1String("b"), "the logo choice reaches the session");
+
+	panel.logoSchool()->setCurrentIndex(panel.logoSchool()->findData(QStringLiteral("b")));
+	check(session.logoPresidentId() == QLatin1String("b"), "the logo school is chosen from the live bar");
 	check(session.setVote(QStringLiteral("b"), FffVote::Red) &&
-		      live.logo()->currentData().toString() == QLatin1String("b"),
+		      panel.logoSchool()->currentData().toString() == QLatin1String("b"),
 	      "a vote keeps the logo choice");
+
+	check(session.logoRound() == 1 && panel.roundOneButton()->isChecked() && !panel.roundTwoButton()->isChecked() &&
+		      panel.logoWarning()->isHidden(),
+	      "round 1 is chosen and needs no warning");
+	panel.roundTwoButton()->click();
+	check(session.logoRound() == 2 && panel.roundTwoButton()->isChecked() && !panel.roundOneButton()->isChecked(),
+	      "round 2 is chosen with its button");
+	check(!panel.logoWarning()->isHidden() &&
+		      panel.logoWarning()->text() == QStringLiteral("⚠ สำนักสอง ยังไม่มี PNG ของ Round 2"),
+	      "a school without round 2 artwork is called out");
+	FffPresident withLogo2 = *session.presidentById(QStringLiteral("b"));
+	withLogo2.logo2 = QStringLiteral("logo2-test.png");
+	check(session.updatePresident(withLogo2) && panel.logoWarning()->isHidden(),
+	      "adding round 2 artwork clears the warning");
+	withLogo2.logo2.clear();
+	check(session.updatePresident(withLogo2) && !panel.logoWarning()->isHidden(),
+	      "removing it brings the warning back");
+	panel.roundTwoButton()->click();
+	check(session.logoRound() == 2 && panel.roundTwoButton()->isChecked(), "pressing the chosen round keeps it");
+	panel.roundOneButton()->click();
+	check(session.logoRound() == 1 && panel.roundOneButton()->isChecked() && panel.logoWarning()->isHidden(),
+	      "back to round 1 hides the warning");
+
+	const QString roundConfig = fffTestConfigPath;
+	fffTestConfigPath = blockedConfig();
+	panel.roundTwoButton()->click();
+	check(session.logoRound() == 1 && panel.roundOneButton()->isChecked() && !panel.roundTwoButton()->isChecked() &&
+		      !panel.error()->isHidden(),
+	      "a failed round switch leaves round 1 chosen and says so");
+	fffTestConfigPath = roundConfig;
+	check(session.setVote(QStringLiteral("a"), FffVote::Green) && panel.error()->isHidden(),
+	      "the error clears on the next change");
+
+	check(panel.minimumSizeHint().width() <= 320, "the live bar fits a 320px dock");
 }
 
 static void testRosterTab(FffSession &session)
