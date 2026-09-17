@@ -37,7 +37,7 @@ public:
 	QPushButton *addButton() const { return m_add; }
 	QToolButton *pngButton() const { return m_png; }
 	QToolButton *moreButton() const { return m_more; }
-	// kind is "card", "bottomBar" or "logo".
+	// kind is "card", "bottomBar", "logo" or "logo2".
 	QAction *chooseAction(const QString &kind) const { return m_choose.value(kind); }
 	QAction *clearAction(const QString &kind) const { return m_clear.value(kind); }
 	QAction *regeneratePinAction() const { return m_regeneratePin; }

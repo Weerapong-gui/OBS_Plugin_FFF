@@ -24,7 +24,7 @@ GPL-2.0-or-later
 
 namespace {
 
-enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3, ColBottomBar = 4, ColLogo = 5 };
+enum Column { ColName = 0, ColSchool = 1, ColPin = 2, ColCard = 3, ColBottomBar = 4, ColLogo = 5, ColLogo2 = 6 };
 
 constexpr int kVisibleRows = 6;
 
@@ -45,12 +45,13 @@ FffRosterTab::FffRosterTab(FffSession *session, QWidget *parent) : QWidget(paren
 {
 	auto *layout = new QVBoxLayout(this);
 
-	m_table = new QTableWidget(0, 6, this);
+	m_table = new QTableWidget(0, 7, this);
 	m_table->setHorizontalHeaderLabels({QStringLiteral("ชื่อนายก"), QStringLiteral("สำนักวิชา"), QStringLiteral("PIN"),
-					    QStringLiteral("การ์ด"), QStringLiteral("BAR"), QStringLiteral("โลโก้")});
+					    QStringLiteral("การ์ด"), QStringLiteral("BAR"), QStringLiteral("โลโก้ R1"),
+					    QStringLiteral("โลโก้ R2")});
 	m_table->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
 	m_table->horizontalHeader()->setSectionResizeMode(ColSchool, QHeaderView::Stretch);
-	for (int column : {ColPin, ColCard, ColBottomBar, ColLogo})
+	for (int column : {ColPin, ColCard, ColBottomBar, ColLogo, ColLogo2})
 		m_table->horizontalHeader()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
 	m_table->verticalHeader()->setVisible(false);
 	m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -63,7 +64,10 @@ FffRosterTab::FffRosterTab(FffSession *session, QWidget *parent) : QWidget(paren
 		{QStringLiteral("card"), QStringLiteral("เลือกการ์ด PNG (สำรอง)…"), QStringLiteral("ลบการ์ด PNG")},
 		{QStringLiteral("bottomBar"), QStringLiteral("เลือก BOTTOM BAR PNG…"),
 		 QStringLiteral("ลบ BOTTOM BAR PNG")},
-		{QStringLiteral("logo"), QStringLiteral("เลือกโลโก้กลาง PNG…"), QStringLiteral("ลบโลโก้กลาง PNG")},
+		{QStringLiteral("logo"), QStringLiteral("เลือกโลโก้กลาง Round 1 PNG…"),
+		 QStringLiteral("ลบโลโก้กลาง Round 1 PNG")},
+		{QStringLiteral("logo2"), QStringLiteral("เลือกโลโก้กลาง Round 2 PNG…"),
+		 QStringLiteral("ลบโลโก้กลาง Round 2 PNG")},
 	};
 
 	m_add = new QPushButton(QStringLiteral("+ เพิ่ม"), this);
@@ -154,7 +158,8 @@ void FffRosterTab::refresh()
 		const QList<QPair<int, QString>> fixed = {{ColPin, president.pin},
 							  {ColCard, mark(president.card)},
 							  {ColBottomBar, mark(president.bottomBar)},
-							  {ColLogo, mark(president.logo)}};
+							  {ColLogo, mark(president.logo)},
+							  {ColLogo2, mark(president.logo2)}};
 		for (const auto &cell : fixed) {
 			auto *item = new QTableWidgetItem(cell.second);
 			item->setFlags(item->flags() & ~Qt::ItemIsEditable);
@@ -205,6 +210,7 @@ void FffRosterTab::updateActions()
 	m_clear.value(QStringLiteral("card"))->setEnabled(selected && !president->card.isEmpty());
 	m_clear.value(QStringLiteral("bottomBar"))->setEnabled(selected && !president->bottomBar.isEmpty());
 	m_clear.value(QStringLiteral("logo"))->setEnabled(selected && !president->logo.isEmpty());
+	m_clear.value(QStringLiteral("logo2"))->setEnabled(selected && !president->logo2.isEmpty());
 }
 
 void FffRosterTab::addPresident()
@@ -226,7 +232,8 @@ void FffRosterTab::chooseAsset(const QString &kind)
 	if (id.isEmpty())
 		return;
 	const QString title = kind == QLatin1String("bottomBar") ? QStringLiteral("เลือก BOTTOM BAR PNG")
-			      : kind == QLatin1String("logo")    ? QStringLiteral("เลือกโลโก้กลาง PNG")
+			      : kind == QLatin1String("logo")    ? QStringLiteral("เลือกโลโก้กลาง Round 1 PNG")
+			      : kind == QLatin1String("logo2")   ? QStringLiteral("เลือกโลโก้กลาง Round 2 PNG")
 								 : QStringLiteral("เลือกการ์ด PNG สำรอง");
 	const QString file = QFileDialog::getOpenFileName(this, title, QString(), QStringLiteral("การ์ด PNG (*.png)"));
 	if (file.isEmpty())
@@ -251,6 +258,8 @@ void FffRosterTab::applyAsset(const QString &kind, const QString &stored)
 		updated.bottomBar = stored;
 	else if (kind == QLatin1String("logo"))
 		updated.logo = stored;
+	else if (kind == QLatin1String("logo2"))
+		updated.logo2 = stored;
 	else
 		updated.card = stored;
 	if (!m_session->updatePresident(updated))

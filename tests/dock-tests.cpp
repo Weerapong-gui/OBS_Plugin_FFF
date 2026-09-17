@@ -152,8 +152,11 @@ static void testRosterTab(FffSession &session)
 	QStringList errors;
 	QObject::connect(&roster, &FffRosterTab::errorRaised, [&](const QString &message) { errors.append(message); });
 
-	check(roster.table()->rowCount() == 2 && roster.table()->columnCount() == 6,
-	      "the roster lists everyone in six columns");
+	check(roster.table()->rowCount() == 2 && roster.table()->columnCount() == 7,
+	      "the roster lists everyone in seven columns");
+	check(roster.table()->horizontalHeaderItem(5)->text() == QStringLiteral("โลโก้ R1") &&
+		      roster.table()->horizontalHeaderItem(6)->text() == QStringLiteral("โลโก้ R2"),
+	      "both logo rounds have a column");
 	check(roster.table()->item(0, 3)->text() == QStringLiteral("—"), "missing artwork reads as a dash");
 	check(!roster.pngButton()->isEnabled() && !roster.moreButton()->isEnabled() &&
 		      roster.pngButton()->toolTip() == QStringLiteral("เลือกนายกในตารางก่อน"),
@@ -179,6 +182,23 @@ static void testRosterTab(FffSession &session)
 	check(session.presidentById(QStringLiteral("a"))->bottomBar.isEmpty() &&
 		      roster.table()->item(0, 4)->text() == QStringLiteral("—"),
 	      "clearing artwork needs no confirmation");
+
+	check(roster.chooseAction(QStringLiteral("logo2"))->isEnabled() &&
+		      !roster.clearAction(QStringLiteral("logo2"))->isEnabled() &&
+		      roster.chooseAction(QStringLiteral("logo2"))->text() == QStringLiteral("เลือกโลโก้กลาง Round 2 PNG…") &&
+		      roster.chooseAction(QStringLiteral("logo"))->text() == QStringLiteral("เลือกโลโก้กลาง Round 1 PNG…"),
+	      "round 2 logo artwork can be chosen once a row is selected");
+	FffPresident withLogo2 = *session.presidentById(QStringLiteral("a"));
+	withLogo2.logo2 = QStringLiteral("logo2-test.png");
+	check(session.updatePresident(withLogo2), "give the president round 2 logo artwork");
+	roster.refresh();
+	check(roster.table()->item(0, 6)->text() == QStringLiteral("✓") &&
+		      roster.clearAction(QStringLiteral("logo2"))->isEnabled(),
+	      "round 2 logo artwork shows a tick and can be cleared");
+	roster.clearAction(QStringLiteral("logo2"))->trigger();
+	check(session.presidentById(QStringLiteral("a"))->logo2.isEmpty() &&
+		      roster.table()->item(0, 6)->text() == QStringLiteral("—"),
+	      "clearing round 2 logo artwork needs no confirmation");
 
 	const QString pinBefore = session.presidentById(QStringLiteral("a"))->pin;
 	asked.clear();
