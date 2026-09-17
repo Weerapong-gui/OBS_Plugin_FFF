@@ -258,6 +258,24 @@ static void testSettingsTab(FffSession &session, FffHttpServer &server)
 	      "start listens again on the chosen port");
 }
 
+// F1: FffDock builds the session, then the server, then the panels as
+// children of the dock, so Qt deletes them in that order too. ~FffHttpServer
+// stops the server and used to emit clientsChanged while doing it, which ran
+// FffLivePanel::refresh() and FffSettingsTab::refresh() against the session
+// that had already been freed a moment earlier. Reaching the end of this
+// function without ASan reporting a heap-use-after-free is the check.
+static void testTeardownOrder()
+{
+	auto *parent = new QWidget();
+	auto *session = new FffSession(parent);
+	auto *server = new FffHttpServer(session, parent);
+	QString error;
+	check(server->start(0, &error), "teardown server starts");
+	new FffLivePanel(session, server, parent);
+	new FffSettingsTab(session, server, parent);
+	delete parent;
+}
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -280,6 +298,7 @@ int main(int argc, char **argv)
 	testLivePanel(session, server);
 	testRosterTab(session);
 	testSettingsTab(session, server);
+	testTeardownOrder();
 	qInfo("PASS: dock live panel, roster tab and settings tab");
 	return 0;
 }

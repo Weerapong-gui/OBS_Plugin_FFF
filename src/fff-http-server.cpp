@@ -21,6 +21,7 @@ GPL-2.0-or-later
 #include <QPointer>
 #include <QRandomGenerator>
 #include <QSet>
+#include <QSignalBlocker>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -139,6 +140,9 @@ FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(par
 
 FffHttpServer::~FffHttpServer()
 {
+	// Sibling widgets are children of the same dock and may already be gone by
+	// the time Qt gets here, so stop()'s clientsChanged must not reach them.
+	const QSignalBlocker blocker(this);
 	stop();
 }
 
