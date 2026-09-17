@@ -1,6 +1,7 @@
 // Dock panels driven offscreen against a real session and server.
 #include "fff-dock-live.h"
 #include "fff-dock-roster.h"
+#include "fff-dock-settings.h"
 #include "fff-dock-ui.h"
 #include "fff-http-server.h"
 #include "fff-session.h"
@@ -8,14 +9,18 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
+#include <QHostAddress>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStringList>
 #include <QTableWidget>
+#include <QTcpServer>
 #include <QTemporaryDir>
 #include <QToolButton>
 
@@ -195,6 +200,64 @@ static void testRosterTab(FffSession &session)
 	check(errors.isEmpty(), "no roster errors on the happy path");
 }
 
+static quint16 freePort()
+{
+	QTcpServer probe;
+	check(probe.listen(QHostAddress::LocalHost, 0), "find a free port");
+	const quint16 port = probe.serverPort();
+	probe.close();
+	return port;
+}
+
+static void testSettingsTab(FffSession &session, FffHttpServer &server)
+{
+	FffSettingsTab settings(&session, &server);
+	check(settings.serverStatus()->text().startsWith(QStringLiteral("กำลังฟังพอร์ต")), "the status names the port");
+	check(settings.needsAttention() == FffHttpServer::lanAddresses().isEmpty(),
+	      "a listening server needs attention only without a LAN address");
+
+	check(!settings.lanToggle()->isChecked() && settings.lanDetails()->isHidden(),
+	      "LAN monitor starts off and hides its link");
+	settings.lanToggle()->setChecked(true);
+	check(session.monitorLanEnabled() && !settings.lanDetails()->isHidden(), "ticking the box enables LAN monitor");
+	const QStringList lan = FffHttpServer::lanAddresses();
+	if (lan.isEmpty())
+		qInfo("SKIP: no LAN address; monitor link text not checked");
+	else
+		check(settings.lanLinks().contains(QStringLiteral("http://%1:%2/monitor?key=%3")
+							   .arg(lan.first())
+							   .arg(server.boundPort())
+							   .arg(session.monitorKey())),
+		      "the link carries address, port and key");
+
+	const QString key = session.monitorKey();
+	asked.clear();
+	answer = false;
+	settings.regenerateKeyButton()->click();
+	check(asked == QStringList{QStringLiteral("สุ่มกุญแจ monitor ใหม่")} && session.monitorKey() == key,
+	      "a declined regeneration keeps the key");
+	answer = true;
+	settings.regenerateKeyButton()->click();
+	check(session.monitorKey() != key, "a confirmed regeneration replaces the key");
+
+	const QString config = fffTestConfigPath;
+	fffTestConfigPath = blockedConfig();
+	settings.lanToggle()->setChecked(false);
+	check(session.monitorLanEnabled() && settings.lanToggle()->isChecked(), "a failed switch-off restores the checkbox");
+	fffTestConfigPath = config;
+	settings.lanToggle()->setChecked(false);
+	check(!session.monitorLanEnabled() && settings.lanDetails()->isHidden(), "switching off hides the link");
+
+	asked.clear();
+	settings.serverButton()->click();
+	check(!server.isListening() && asked.isEmpty() && settings.needsAttention(),
+	      "an idle server stops without a question and flags the tab");
+	settings.portField()->setValue(freePort());
+	settings.serverButton()->click();
+	check(server.isListening() && settings.serverStatus()->text().startsWith(QStringLiteral("กำลังฟังพอร์ต")),
+	      "start listens again on the chosen port");
+}
+
 int main(int argc, char **argv)
 {
 	QApplication app(argc, argv);
@@ -216,6 +279,7 @@ int main(int argc, char **argv)
 
 	testLivePanel(session, server);
 	testRosterTab(session);
-	qInfo("PASS: dock live panel and roster tab");
+	testSettingsTab(session, server);
+	qInfo("PASS: dock live panel, roster tab and settings tab");
 	return 0;
 }

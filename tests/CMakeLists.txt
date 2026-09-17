@@ -48,6 +48,7 @@ add_executable(
   obs-stubs.cpp
   ../src/fff-dock-live.cpp
   ../src/fff-dock-roster.cpp
+  ../src/fff-dock-settings.cpp
   ../src/fff-session.cpp
   ../src/fff-http-server.cpp
   ../src/fff-monitor-access.cpp
