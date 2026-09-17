@@ -81,6 +81,9 @@ QByteArray deniedText(const QString &path)
 	return texts.value(path, QByteArrayLiteral("monitor access required"));
 }
 
+// A key link clicked inside another website arrives cross-site, so the browser
+// holds back the SameSite=Strict cookie the redirect just set. A reload started
+// from this page is same-site and carries it; retry at most once every 10 s.
 QByteArray monitorDeniedPage()
 {
 	return QStringLiteral("<!doctype html><html lang=\"th\"><head><meta charset=\"utf-8\">"
@@ -88,6 +91,15 @@ QByteArray monitorDeniedPage()
 			      "<body style=\"font-family:sans-serif;background:#0e1116;color:#f4f6f8;padding:32px\">"
 			      "<h1>เปิดจอมอนิเตอร์ไม่ได้</h1>"
 			      "<p>ต้องเปิดจากลิงก์ใน dock (แท็บ ตั้งค่า → Monitor LAN) และ operator ต้องเปิดสิทธิ์ไว้</p>"
+			      "<script>"
+			      "try {"
+			      "const last = Number(sessionStorage.getItem(\"fffMonitorRetry\") || 0);"
+			      "if (Date.now() - last > 10000) {"
+			      "sessionStorage.setItem(\"fffMonitorRetry\", String(Date.now()));"
+			      "location.reload();"
+			      "}"
+			      "} catch (err) {}"
+			      "</script>"
 			      "</body></html>")
 		.toUtf8();
 }

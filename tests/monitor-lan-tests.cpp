@@ -174,7 +174,8 @@ static void testServer(FffSession &session, FffHttpServer &server)
 	clock.restart();
 	const QByteArray guessed = call("GET", host, "/monitor?key=00000000000000000000000000000000");
 	check(statusOf(guessed) == 403 && clock.elapsed() >= 900, "a wrong key is refused slowly");
-	check(headerOf(guessed, "Content-Type").startsWith("text/html") && bodyOf(guessed).contains("dock"),
+	check(headerOf(guessed, "Content-Type").startsWith("text/html") && bodyOf(guessed).contains("dock") &&
+		      bodyOf(guessed).contains("location.reload()"),
 	      "the refusal page says where the link lives");
 
 	const QByteArray redirect = call("GET", host, "/monitor?key=" + key);
