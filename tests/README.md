@@ -312,3 +312,18 @@ file that needs the frontend API, stays out) and drives them offscreen with
 `QT_QPA_PLATFORM=offscreen`. `fffSetConfirmOverride()` answers confirmations so
 no modal loop runs. The tests CMake points Qt's OpenGL wrapper at OpenGL because
 current macOS SDKs no longer ship AGL.
+
+## Monitor page furniture
+
+`tests/monitor-ui.cjs` serves the real monitor page with a small fixture: the
+top tools stay pinned while the page scrolls, flag/status/artwork controls are
+disabled rather than hidden so the canvas never moves, the grid tab rests in
+BOTTOM BAR, the last side tab survives a reload, the template stage is fitted
+once its tab shows, and a 900px window has no horizontal scroll.
+
+```sh
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/monitor-ui.cjs
+```
+
+`overlay-layout.cjs` opens a tool's tab through `press()` before clicking it and
+switches edit mode with `setEditMode()`.

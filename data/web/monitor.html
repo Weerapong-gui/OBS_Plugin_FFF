@@ -8,11 +8,37 @@
 </head>
 <body class="monitor">
 
-<div class="bar">
-  <div class="bar-title">จอมอนิเตอร์</div>
-  <div id="status" class="bar-status" role="status"></div>
-  <div id="warn" class="bar-warn hidden" role="alert">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
-</div>
+<header class="monitor-top">
+  <div class="bar">
+    <div class="bar-title">จอมอนิเตอร์</div>
+    <div id="status" class="bar-status air-pill" role="status" data-air="blank"></div>
+    <div id="roundStatus" class="bar-round"></div>
+    <p id="saveStatus" class="bar-save" role="status"></p>
+    <div id="warn" class="bar-warn hidden" role="alert">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
+    <div id="accessDenied" class="bar-warn hidden" role="alert">กุญแจถูกเปลี่ยนหรือปิดสิทธิ์แล้ว — ขอลิงก์ใหม่จาก operator</div>
+  </div>
+  <div class="top-tools">
+    <div id="editMode" class="segmented" role="radiogroup" aria-label="แก้ไขโหมด">
+      <span class="group-label">แก้ไขโหมด</span>
+      <input type="radio" name="editMode" id="editModeScoreboard" value="scoreboard" checked /><label for="editModeScoreboard">Show Status</label>
+      <input type="radio" name="editMode" id="editModeBottomBar" value="bottomBar" /><label for="editModeBottomBar">BOTTOM BAR</label>
+    </div>
+    <label class="top-select">ชิ้นงาน <select id="selection"></select></label>
+    <div id="cardControls" class="piece-options">
+      <span class="flag-controls">ธง
+        <button class="flag-none" data-vote="none" disabled title="เลือกการ์ดก่อน">ยังไม่กำหนด</button>
+        <button class="flag-green" data-vote="green" disabled title="เลือกการ์ดก่อน">เขียว</button>
+        <button class="flag-red" data-vote="red" disabled title="เลือกการ์ดก่อน">แดง</button>
+      </span>
+      <span id="statusControls" class="status-controls">สถานะ
+        <button class="status-qualified" data-status="qualified" disabled title="เลือกการ์ดก่อน">QUALIFIED</button>
+        <button class="status-unqualified" data-status="unqualified" disabled title="เลือกการ์ดก่อน">UNQUALIFIED</button>
+        <button class="status-waiting" data-status="waiting" disabled title="เลือกการ์ดก่อน">WAITING</button>
+      </span>
+    </div>
+  </div>
+  <div id="airWarning" class="air-warning" role="alert" hidden>⚠ กำลังแก้โหมดที่ออกอากาศอยู่ — ย้าย/เปลี่ยนธง คนดูเห็นทันที</div>
+</header>
 
 <div class="monitor-workspace"><section class="board-panel">
 <div id="frame" class="frame">
@@ -30,70 +56,56 @@
   </div>
   <div id="canvasZoom" class="zoom-bar" role="group" aria-label="มุมมอง">
     <button id="canvasZoomOut" aria-label="ซูมออก">−</button><output id="canvasZoomValue"></output><button id="canvasZoomIn" aria-label="ซูมเข้า">+</button><button id="canvasZoomActual">1:1</button><button id="canvasZoomFit">พอดีจอ</button>
+    <label class="zoom-grid"><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
   </div>
 </div>
-
-<div class="controls">
-  <div class="control-group" role="group" aria-label="โหมดและชิ้นงาน">
-    <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">Show Status</option><option value="bottomBar">BOTTOM BAR</option></select></label>
-    <label>เลือก <select id="selection"></select></label>
+<div class="canvas-footer">
+  <p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ลูกศรขยับ 1px</p>
+  <output id="symmetry" class="symmetry"></output>
+</div>
+</section>
+<aside class="side-panel">
+  <div class="tabs" role="tablist" aria-label="เครื่องมือ">
+    <button type="button" role="tab" id="tab-position" aria-controls="panel-position" aria-selected="true">ตำแหน่ง</button>
+    <button type="button" role="tab" id="tab-grid" aria-controls="panel-grid" aria-selected="false" tabindex="-1">ตาราง</button>
+    <button type="button" role="tab" id="tab-template" aria-controls="panel-template" aria-selected="false" tabindex="-1">แม่แบบ</button>
+    <button type="button" role="tab" id="tab-status-png" aria-controls="panel-status-png" aria-selected="false" tabindex="-1">PNG สถานะ</button>
   </div>
-  <div class="control-group" role="group" aria-label="ตำแหน่ง">
-    <button id="centerX">กึ่งกลางแนวนอน</button>
-    <button id="centerY">กึ่งกลางแนวตั้ง</button>
-    <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
-    <button id="resetAll">รีเซ็ตทั้งหมด</button>
-  </div>
-  <div class="control-group opacity-controls" role="group" aria-label="ขนาดและความทึบ">
-    <label>PNG % <input id="imageOpacity" type="number" min="0" max="100" value="100" /></label>
-    <label>สีธง % <input id="resultOpacity" type="number" min="0" max="100" value="100" /></label>
-    <label>ชิ้นงานกว้าง % <input id="pieceWidth" type="number" min="50" max="200" value="100" /></label>
-    <label>ชิ้นงานสูง % <input id="pieceHeight" type="number" min="50" max="200" value="100" /></label>
-  </div>
-  <div class="control-group layer-controls" role="group" aria-label="ลำดับชั้น">
-    <span class="group-label">Layer</span>
-    <button data-layer="front">หน้าสุด</button>
-    <button data-layer="forward">ขึ้น</button>
-    <button data-layer="backward">ลง</button>
-    <button data-layer="back">หลังสุด</button>
-  </div>
-  <div class="control-group" role="group" aria-label="ตาราง">
-    <label><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
-    <!-- Arranging the card grid is a SCOREBOARD job; the gridline toggle above
-         stays available in both modes. -->
-    <span class="grid-tools">
+  <section id="panel-position" class="controls" role="tabpanel" aria-labelledby="tab-position">
+    <div class="control-group" role="group" aria-label="ตำแหน่ง">
+      <button id="centerX">กึ่งกลางแนวนอน</button>
+      <button id="centerY">กึ่งกลางแนวตั้ง</button>
+    </div>
+    <div class="control-group opacity-controls" role="group" aria-label="ขนาดและความทึบ">
+      <label>PNG % <input id="imageOpacity" type="number" min="0" max="100" value="100" /></label>
+      <label>สีธง % <input id="resultOpacity" type="number" min="0" max="100" value="100" /></label>
+      <label>ชิ้นงานกว้าง % <input id="pieceWidth" type="number" min="50" max="200" value="100" /></label>
+      <label>ชิ้นงานสูง % <input id="pieceHeight" type="number" min="50" max="200" value="100" /></label>
+    </div>
+    <div class="control-group layer-controls" role="group" aria-label="ลำดับชั้น">
+      <span class="group-label">Layer</span>
+      <button data-layer="front">หน้าสุด</button>
+      <button data-layer="forward">ขึ้น</button>
+      <button data-layer="backward">ลง</button>
+      <button data-layer="back">หลังสุด</button>
+    </div>
+    <div class="control-group" role="group" aria-label="รีเซ็ต">
+      <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
+      <button id="resetAll">รีเซ็ตทั้งหมด</button>
+    </div>
+  </section>
+  <section id="panel-grid" class="controls" role="tabpanel" aria-labelledby="tab-grid" hidden>
+    <div class="control-group grid-tools" role="group" aria-label="ตาราง">
       <label>คอลัมน์ <input id="gridColumns" type="number" min="1" max="3" value="3" /></label>
       <label>ห่าง X <input id="gridGapX" type="number" min="0" max="300" value="34" /></label>
       <label>ห่าง Y <input id="gridGapY" type="number" min="0" max="300" value="28" /></label>
       <button id="gridPreview" aria-pressed="false">ดูตัวอย่างตาราง</button>
       <button id="gridApply" disabled>ใช้ตาราง</button>
       <button id="gridCancel" disabled>ยกเลิกตาราง</button>
-    </span>
-  </div>
-  <output id="symmetry" class="symmetry"></output>
-</div>
-<div id="cardControls" class="piece-options" hidden>
-  <span class="flag-controls">กำหนดธง
-    <button class="flag-none" data-vote="none">ยังไม่กำหนด</button>
-    <button class="flag-green" data-vote="green">เขียว</button>
-    <button class="flag-red" data-vote="red">แดง</button>
-  </span>
-  <span id="statusControls" class="status-controls">สถานะ
-    <button class="status-qualified" data-status="qualified">QUALIFIED</button>
-    <button class="status-unqualified" data-status="unqualified">UNQUALIFIED</button>
-    <button class="status-waiting" data-status="waiting">WAITING</button>
-  </span>
-</div>
-<div id="statusAssets" class="status-assets" hidden>
-  <span class="group-label">PNG ต่อสถานะ</span>
-  <label>QUALIFIED <input type="file" accept="image/png" data-asset="qualified" /><button data-clear="qualified">ลบ</button></label>
-  <label>UNQUALIFIED <input type="file" accept="image/png" data-asset="unqualified" /><button data-clear="unqualified">ลบ</button></label>
-  <label>WAITING <input type="file" accept="image/png" data-asset="waiting" /><button data-clear="waiting">ลบ</button></label>
-</div>
-<p id="saveStatus" class="hint" role="status"></p>
-<p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ดูตัวอย่างตารางก่อนกดใช้ · ตารางช่องละ 60px</p>
-</section>
-<aside class="template-panel">
+    </div>
+    <p class="hint">ดูตัวอย่างตารางก่อนกดใช้ · ใช้ได้เฉพาะโหมด Show Status</p>
+  </section>
+  <section id="panel-template" class="template-panel" role="tabpanel" aria-labelledby="tab-template" hidden>
   <h2 id="templateTitle">แม่แบบทุกการ์ด</h2>
   <p id="templateHint">แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
   <div class="template-toolbar">
@@ -130,11 +142,21 @@
   </div>
   <div class="template-toolbar"><button id="templateApply">ใช้แม่แบบกับทุกการ์ด</button><button id="templateCancel">ยกเลิกการแก้ไข</button></div>
   <p id="templateStatus" role="status"></p>
+  </section>
+  <section id="panel-status-png" role="tabpanel" aria-labelledby="tab-status-png" hidden>
+    <div id="statusAssets" class="status-assets">
+      <label>QUALIFIED <input type="file" accept="image/png" data-asset="qualified" disabled /><button data-clear="qualified" disabled>ลบ</button></label>
+      <label>UNQUALIFIED <input type="file" accept="image/png" data-asset="unqualified" disabled /><button data-clear="unqualified" disabled>ลบ</button></label>
+      <label>WAITING <input type="file" accept="image/png" data-asset="waiting" disabled /><button data-clear="waiting" disabled>ลบ</button></label>
+    </div>
+    <p id="statusAssetsHint" class="hint">เลือกการ์ดก่อน แล้วอัปโหลด PNG ของแต่ละสถานะ</p>
+  </section>
 </aside></div>
 
 <script src="/view-zoom.js"></script>
 <script src="/board.js"></script>
 <script src="/template-editor.js"></script>
+<script src="/monitor-ui.js"></script>
 <script>
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
@@ -204,6 +226,20 @@ function projectedState() {
   return state;
 }
 
+// Flag, status and status-artwork controls belong to a card. They stay where
+// they are and say why they are unavailable, so choosing a piece never shifts
+// the canvas under the pointer.
+function setCardControls(isCard) {
+  for (const button of document.querySelectorAll("[data-vote], [data-status]")) {
+    if (button.dataset.busy) continue;
+    button.disabled = !isCard;
+    button.title = isCard ? "" : "เลือกการ์ดก่อน";
+  }
+  for (const control of document.querySelectorAll("#statusAssets input, #statusAssets button"))
+    control.disabled = !isCard;
+  document.getElementById("statusAssetsHint").hidden = isCard;
+}
+
 function apply() {
   if (!lastState) return;
   const overrides = new Map();
@@ -217,7 +253,7 @@ function apply() {
     document.getElementById(id).disabled = !piece;
   for (const button of document.querySelectorAll("[data-layer]"))
     button.disabled = !piece;
-  cardControls.hidden = !piece;
+  setCardControls(!!piece && selected.startsWith("card:"));
   // A vote button is a choice, not a fire-and-forget action: say which colour
   // the selected card is actually on.
   const vote = selected.startsWith("card:") &&
@@ -231,10 +267,6 @@ function apply() {
     document.getElementById(id).value = Math.round((layout[key] ?? fallback) * 100);
   const isCard = selected.startsWith("card:");
   document.getElementById("resultOpacity").disabled = !isCard;
-  // Status drives the scoreboard and flags drive the bottom bar, but both belong
-  // to the same card, so a selected card offers both wherever it is being edited.
-  document.getElementById("statusControls").hidden = !isCard;
-  document.getElementById("statusAssets").hidden = !isCard;
   const status = isCard &&
     (lastState.presidents.find(p => "card:" + p.id === selected) || {}).status;
   for (const button of document.querySelectorAll("[data-status]"))
@@ -251,7 +283,6 @@ function apply() {
   const balanced = Math.abs(left - right) <= 2;
   symmetry.textContent = `ซ้าย ${left} · ขวา ${right} ${balanced ? "✓" : ""}`;
   symmetry.classList.toggle("ok", balanced);
-  cardControls.hidden = !isCard;
 }
 
 function showGuides(active) {
@@ -490,6 +521,7 @@ document.getElementById("resetAll").onclick = () => {
 for (const button of document.querySelectorAll("[data-vote]")) {
   button.onclick = async () => {
     if (!selected.startsWith("card:")) return;
+    button.dataset.busy = "1";
     button.disabled = true;
     try {
       const res = await fetch("/api/operator/vote", {
@@ -501,7 +533,9 @@ for (const button of document.querySelectorAll("[data-vote]")) {
     } catch (err) {
       saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
+      delete button.dataset.busy;
       button.disabled = false;
+      apply();
     }
   };
 }
@@ -509,6 +543,7 @@ for (const button of document.querySelectorAll("[data-vote]")) {
 for (const button of document.querySelectorAll("[data-status]")) {
   button.onclick = async () => {
     if (!selected.startsWith("card:")) return;
+    button.dataset.busy = "1";
     button.disabled = true;
     try {
       const res = await fetch("/api/status", {
@@ -520,7 +555,9 @@ for (const button of document.querySelectorAll("[data-status]")) {
     } catch (err) {
       saveStatus.textContent = "ตั้งสถานะไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
+      delete button.dataset.busy;
       button.disabled = false;
+      apply();
     }
   };
 }
@@ -610,13 +647,17 @@ function render(incoming) {
   apply();
 }
 
-document.getElementById("editMode").onchange = event => {
+// Tabs only choose which tools are in view; nothing here touches the board.
+const sideTabs = createTabs(document.querySelector(".side-panel [role=tablist]"), { fallback: "position" });
+// Arranging the card grid is a Show Status job, so its tab rests in BOTTOM BAR.
+document.getElementById("editMode").addEventListener("change", event => {
+  if (event.target.name !== "editMode") return;
   endDrag(); commitDraft(); gridDrafts = null;
   editMode = event.target.value; selected = "";
-  document.querySelector(".grid-tools").hidden = editMode === "bottomBar";
+  sideTabs.setDisabled("grid", editMode === "bottomBar", "ใช้ได้เฉพาะ Show Status");
   showGridPreview(null);
   if (sourceState) render(sourceState);
-};
+});
 for (const [id, key] of [["imageOpacity", "imageOpacity"], ["resultOpacity", "resultOpacity"], ["pieceWidth", "scaleX"], ["pieceHeight", "scaleY"]]) {
   document.getElementById(id).onchange = event => {
     const value = event.target.valueAsNumber;

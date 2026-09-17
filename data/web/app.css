@@ -698,3 +698,53 @@ body.monitor {
 .opacity-controls input { width: 70px; }
 
 .grid-tools[hidden] { display: none; }
+
+/* ---------- monitor: pinned tools and side tabs ---------- */
+
+/* The tools the layout operator reaches for most stay on screen however far
+   the page scrolls. */
+.monitor-top { position: sticky; top: 0; z-index: 20; margin: -16px -16px 12px; padding: 12px 16px 10px;
+  background: #0e1116; border-bottom: 1px solid var(--edge); }
+.monitor-top .bar { flex-wrap: wrap; margin-bottom: 8px; }
+.air-pill { padding: 4px 10px; border-radius: 999px; font-weight: 800; color: #fff; background: var(--grey); }
+.air-pill:empty { display: none; }
+.air-pill[data-air="on"] { background: var(--red); }
+.bar-round { color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-save { margin: 0 0 0 auto; color: var(--muted); font-size: 13px; }
+.top-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.top-tools .piece-options { margin-top: 0; }
+.segmented { position: relative; display: inline-flex; align-items: center; }
+.segmented .group-label { margin-right: 8px; color: var(--muted); }
+.segmented input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.segmented label { padding: 8px 14px; border: 1px solid var(--border); background: #1a212b; color: var(--text);
+  font-weight: 700; cursor: pointer; }
+.segmented label:first-of-type { border-radius: 8px 0 0 8px; }
+.segmented label:last-of-type { border-left: 0; border-radius: 0 8px 8px 0; }
+.segmented input:checked + label { background: var(--accent); border-color: var(--accent); color: #0e1116; }
+.segmented input:focus-visible + label { outline: 2px solid var(--ring); outline-offset: 2px; }
+.top-select { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
+.top-select select { width: min(280px, 60vw); min-height: 34px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: #1a212b; color: var(--text); }
+.monitor-top .piece-options button { min-height: 32px; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--border); cursor: pointer; }
+.monitor-top .piece-options button:disabled { opacity: 0.45; cursor: not-allowed; }
+.air-warning { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber); color: #0e1116;
+  font-weight: 700; }
+.air-warning[hidden] { display: none; }
+.zoom-grid { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 12px;
+  color: var(--muted); }
+.canvas-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
+.canvas-footer .hint { margin: 0; }
+.side-panel { min-width: 0; padding: 12px 16px 16px; background: #161b22; border: 1px solid var(--edge);
+  border-radius: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--edge); }
+.tabs [role="tab"] { padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+  color: var(--muted); font-weight: 700; cursor: pointer; }
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs [role="tab"]:disabled { opacity: 0.45; cursor: not-allowed; }
+/* .controls and friends set display, which would otherwise outrank [hidden]. */
+.side-panel [role="tabpanel"][hidden], #statusAssetsHint[hidden] { display: none; }
+.side-panel .controls { margin-top: 0; }
+.side-panel .template-panel { padding: 0; background: none; border: 0; border-radius: 0; }
+.side-panel .status-assets { margin-top: 0; }
+.status-assets input:disabled, .status-assets button:disabled { opacity: 0.45; cursor: not-allowed; }

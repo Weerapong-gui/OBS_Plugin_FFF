@@ -177,7 +177,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const file = { "/": "phone.html", "/overlay": "overlay.html", "/monitor": "monitor.html",
-    "/board.js": "board.js", "/template-editor.js": "template-editor.js", "/view-zoom.js": "view-zoom.js",
+    "/board.js": "board.js", "/template-editor.js": "template-editor.js", "/view-zoom.js": "view-zoom.js", "/monitor-ui.js": "monitor-ui.js",
     "/app.css": "app.css" }[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   res.setHeader("Content-Type", file.endsWith(".js") ? "application/javascript" :
@@ -201,6 +201,28 @@ async function geometry(page, target) {
 function close(a, b, message) {
   for (const key of Object.keys(a))
     assert.ok(Math.abs(a[key] - b[key]) < 1.5, `${message}: ${key}: ${a[key]} vs ${b[key]}`);
+}
+
+// Most tools live in side-panel tabs now; open the owning tab the way an operator would.
+async function reveal(page, selector) {
+  await page.evaluate((sel) => {
+    const panel = document.querySelector(sel)?.closest('[role="tabpanel"]');
+    if (panel && panel.hidden) document.getElementById(panel.getAttribute("aria-labelledby")).click();
+  }, selector);
+}
+
+async function press(page, selector) {
+  await reveal(page, selector);
+  await page.click(selector);
+}
+
+// Edit mode is a radio group; dispatch like a select did so a repeat still re-renders.
+async function setEditMode(page, mode) {
+  await page.evaluate((value) => {
+    const radio = document.querySelector(`input[name="editMode"][value="${value}"]`);
+    radio.checked = true;
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+  }, mode);
 }
 
 async function main() {
@@ -287,7 +309,7 @@ async function main() {
       const shown = (page, id) => page.evaluate(key =>
         board.querySelector(`[data-target="${key}"] .card-image`).getAttribute("src"), id);
       const othersBefore = await shown(overlay, "card:1");
-      await monitor.click('[data-status="qualified"]');
+      await press(monitor, '[data-status="qualified"]');
       await monitor.waitForFunction(() => lastState.presidents[0].status === "qualified", { polling: 50 });
       assert.equal(state.presidents[0].status, "qualified", "the status is chosen per card");
       await overlay.waitForFunction(() =>
@@ -302,7 +324,7 @@ async function main() {
         [...document.querySelectorAll("[data-status]")].find(b => b.getAttribute("aria-pressed") === "true")
           .dataset.status), "qualified", "the monitor shows which status is chosen");
 
-      await monitor.click('[data-status="unqualified"]');
+      await press(monitor, '[data-status="unqualified"]');
       await monitor.waitForFunction(() => lastState.presidents[0].status === "unqualified", { polling: 50 });
       await overlay.waitForFunction(() =>
         board.querySelector('[data-target="card:0"] .card-image').getAttribute("src") ===
@@ -355,9 +377,9 @@ async function main() {
     assert.equal(await monitor.$('[data-target="heading"]'), null);
     assert.equal(await overlay.$('[data-target="heading"]'), null);
     assert.notEqual(await monitor.$eval('#canvas', el => getComputedStyle(el).backgroundImage), 'none');
-    await monitor.click('#showGrid');
+    await press(monitor, '#showGrid');
     assert.equal(await monitor.$eval('#canvas', el => getComputedStyle(el).backgroundImage), 'none');
-    await monitor.click('#showGrid');
+    await press(monitor, '#showGrid');
     await monitor.select("#selection", "card:0");
     for (const [id, value] of [["pieceWidth", "150"], ["pieceHeight", "75"]])
       await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
@@ -372,7 +394,7 @@ async function main() {
     await monitor.$eval("#pieceWidth", (el) => { el.value = "100"; el.dispatchEvent(new Event("change")); });
     await monitor.$eval("#pieceHeight", (el) => { el.value = "100"; el.dispatchEvent(new Event("change")); });
     await settled();
-    await monitor.click("#centerX");
+    await press(monitor, "#centerX");
     await settled();
     assert.equal(state.pieces['card:0'].x, 0.5);
     close(await geometry(monitor, "card:0"), await geometry(overlay, "card:0"), "card geometry matches");
@@ -388,7 +410,7 @@ async function main() {
     await phone.waitForFunction(() => document.getElementById("red").classList.contains("picked"));
     await phone.waitForFunction(() => lastState.you.vote === "red");
     await monitor.bringToFront();
-    await monitor.click('[data-vote="green"]');
+    await press(monitor, '[data-vote="green"]');
     await monitor.waitForFunction(() => lastState.presidents[0].vote === "green");
     assert.equal(state.presidents[0].vote, "green");
     await phone.waitForFunction(() => document.getElementById("green").classList.contains("picked"), { polling: 100 });
@@ -408,7 +430,7 @@ async function main() {
       assert.equal(await page.$eval('[data-target="card:0"] .card-image', el => getComputedStyle(el).zIndex), '1');
       assert.equal(await page.$eval('[data-target="card:0"] .result', el => getComputedStyle(el).zIndex), '0');
     }
-    await monitor.click('[data-layer="front"]');
+    await press(monitor, '[data-layer="front"]');
     await monitor.waitForFunction(() => Object.keys(lastState.layers).length === lastState.presidents.length + 1, { timeout: 5000 });
     const topLayer = Math.max(...Object.values(state.layers));
     assert.equal(state.layers["card:0"], topLayer, "selected card reaches front layer");
@@ -430,23 +452,23 @@ async function main() {
     console.log("PASS: piece width/height, full-card operator vote, SSE-safe controls and keyboard controls");
 
     const beforeTemplate = await geometry(monitor, "card:0");
-    await monitor.click('[data-layer="result"]');
+    await press(monitor, '[data-layer="result"]');
     for (const [id, value] of [["templateX", 35], ["templateY", -20], ["templateWidth", 220], ["templateHeight", 100]]) {
       await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
     }
     assert.equal(state.cardTemplate, undefined, "draft never broadcasts");
     close(await geometry(monitor, "card:0"), beforeTemplate, "draft does not move live cards");
-    await monitor.click("#templateUp");
+    await press(monitor, "#templateUp");
     failSaves = true;
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("บันทึกไม่สำเร็จ"));
     assert.equal(state.cardTemplate, undefined);
     failSaves = false;
     for (const [id, value] of [["templateX", 35], ["templateY", -20], ["templateWidth", 220], ["templateHeight", 100]]) {
       await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
     }
-    await monitor.click("#templateUp");
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateUp");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
     assert.equal(state.cardTemplate.result.x, 35);
     assert.equal(state.cardTemplate.result.width, 220);
@@ -469,7 +491,7 @@ async function main() {
     });
     const templated = await slotBoxes();
     await monitor.$eval("#templateHeight", el => { el.value = 60; el.dispatchEvent(new Event("change")); });
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => lastState.cardTemplate?.result?.height === 60);
     const resized = await slotBoxes();
     assert.deepEqual(resized.image, templated.image, "resizing the result leaves the PNG alone");
@@ -478,12 +500,12 @@ async function main() {
       "the result box followed the template");
     assert.equal(await monitor.$eval('[data-target="card:0"] .result', el => el.style.height), "60px");
     await monitor.$eval("#templateHeight", el => { el.value = 100; el.dispatchEvent(new Event("change")); });
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => lastState.cardTemplate?.result?.height === 100);
     await monitor.$eval("#templateX", el => { el.value = 99; el.dispatchEvent(new Event("change")); });
-    await monitor.click("#templateCancel");
+    await press(monitor, "#templateCancel");
     assert.equal(await monitor.$eval("#templateX", el => el.value), "35");
-    await monitor.click("#templateZoomIn");
+    await press(monitor, "#templateZoomIn");
     const start = await monitor.$eval("#templateSelection", el => {
       const r = el.getBoundingClientRect(); return { x: r.x + 10, y: r.y + 10 };
     });
@@ -494,17 +516,17 @@ async function main() {
     await monitor.mouse.up();
     assert.equal(await monitor.$eval("#templateX", el => el.value), "55");
     assert.equal(await monitor.$eval("#templateY", el => el.value), "-10");
-    await monitor.click("#templateCancel");
+    await press(monitor, "#templateCancel");
     console.log("PASS: template draft, save failure/retry, global rendering, layers, cancel and zoom-correct drag");
 
     const templateBox = () => monitor.$eval('#templateSelection', el => ({
       x: parseFloat(el.style.left), y: parseFloat(el.style.top),
       width: parseFloat(el.style.width), height: parseFloat(el.style.height)
     }));
-    await monitor.click('#templateFit');
+    await press(monitor, '#templateFit');
     for (const layer of ["image", "result"]) {
       const zoom = await monitor.$eval("#templateStage", el => new DOMMatrix(getComputedStyle(el).transform).a);
-      await monitor.click('[data-layer="' + layer + '"]');
+      await press(monitor, '[data-layer="' + layer + '"]');
       const original = await templateBox();
       const handle = await monitor.$eval('#templateResize', el => {
         const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -538,13 +560,13 @@ async function main() {
       }
       await monitor.mouse.up();
       await monitor.keyboard.up('Shift');
-      await monitor.click('#templateCancel');
+      await press(monitor, '#templateCancel');
     }
     for (const page of [monitor, overlay]) {
       assert.equal(await page.$$eval('.slot, .slot .result', els => els.every(el =>
         getComputedStyle(el).borderRadius === '0px')), true, 'cards and result layers have square corners');
     }
-    await monitor.click('[data-layer="result"]');
+    await press(monitor, '[data-layer="result"]');
     console.log("PASS: Shift resize on both placeholders, free resize, zoom, bounds and square corners");
 
     const saved = structuredClone(state.pieces);
@@ -570,11 +592,12 @@ async function main() {
     close(await geometry(monitor, "card:0"), placed, "reload restores placement");
     assert.equal(await monitor.$eval("#templateWidth", el => el.value), "220");
     await monitor.select("#selection", "card:0");
-    await monitor.click("#reset");
+    await press(monitor, "#reset");
     await settled();
     assert.equal(state.pieces["card:0"], undefined);
     assert.deepEqual(state.pieces.heading, saved.heading);
-    await monitor.click("#resetAll");
+    await press(monitor, "#resetAll");
+    await press(monitor, "#resetAll");
     await settled();
     assert.deepEqual(state.pieces, {});
     assert.deepEqual(state.layers, {});
@@ -591,7 +614,7 @@ async function main() {
       state.bottomBar = { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {}, logoPresidentId: "0" };
       state.presidents.forEach(p => { p.bottomBarUrl = CARD_PNG; p.logoUrl = CARD_PNG; p.vote = "green"; });
       state.displayMode = "bottomBar"; push();
-      await monitor.select("#editMode", "bottomBar");
+      await setEditMode(monitor, "bottomBar");
       await ready(count + 4);
       await overlay.waitForFunction(n => board.querySelectorAll(".piece").length === n && document.querySelector(".bottom-bar"), {}, count + 4);
       await overlay.waitForFunction(() => !transition, { polling: 20 });
@@ -615,18 +638,18 @@ async function main() {
     // A response arriving after switching editors must update only its original mode.
     layoutDelay = 150;
     await monitor.$eval("#resultOpacity", el => { el.value = 50; el.dispatchEvent(new Event("change")); });
-    await monitor.select("#editMode", "scoreboard");
+    await setEditMode(monitor, "scoreboard");
     await settled(); layoutDelay = 0;
     assert.equal(state.bottomBar.pieces["card:0"].resultOpacity, 0.5);
     assert.deepEqual(state.pieces, {});
     assert.equal(state.displayMode, "bottomBar");
     assert.equal(await overlay.evaluate(() => board.classList.contains("bottom-bar")), true);
-    await monitor.select("#editMode", "bottomBar");
+    await setEditMode(monitor, "bottomBar");
     // Template opacity is shared until explicitly overridden on a piece.
     await monitor.select("#selection", "card:1");
-    await monitor.click('[data-layer="image"]');
+    await press(monitor, '[data-layer="image"]');
     await monitor.$eval("#templateOpacity", el => { el.value = 50; el.dispatchEvent(new Event("change")); });
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
     await overlay.waitForFunction(() => board.querySelector('[data-target="card:1"] img').style.opacity === "0.5");
     assert.equal(await overlay.$eval('[data-target="card:0"] img', el => el.style.opacity), "1");
@@ -671,16 +694,16 @@ async function main() {
         await overlay.screenshot({ path: "/private/tmp/fff-cover-overlay-review.png", omitBackground: true });
       }
     }
-    await monitor.click('[data-layer="back"]');
+    await press(monitor, '[data-layer="back"]');
     await monitor.waitForFunction(() => lastState.layers.cover === 0);
     await overlay.waitForFunction(() => board.querySelector('[data-target="cover"]').style.zIndex === "0", { polling: 50 });
-    await monitor.click('[data-layer="front"]');
+    await press(monitor, '[data-layer="front"]');
     await monitor.waitForFunction(() => lastState.layers.cover === Math.max(...Object.values(lastState.layers)));
     const coverFront = Math.max(...Object.values(state.bottomBar.layers));
     await overlay.waitForFunction(layer => board.querySelector('[data-target="cover"]').style.zIndex === String(layer), { polling: 50 }, coverFront);
     assert.deepEqual(state.pieces, {});
     assert.deepEqual(state.layers, {});
-    await monitor.click("#reset"); await settled();
+    await press(monitor, "#reset"); await settled();
     assert.equal(state.bottomBar.pieces.cover, undefined);
     close(await geometry(monitor, "cover"), coverBefore, "cover reset restores geometry");
     assert.equal(await overlay.$eval('[data-target="cover"] img', el => el.style.opacity), "1", "card template opacity does not affect cover");
@@ -723,7 +746,7 @@ async function main() {
     assert.equal(await monitor.$eval("#templateLayers", el => el.hidden), true, "a one-box template hides the layer list");
     for (const [id, value] of [["templateX", 12], ["templateY", -8], ["templateWidth", 260], ["templateHeight", 200]])
       await monitor.$eval("#" + id, (el, value) => { el.value = value; el.dispatchEvent(new Event("change")); }, value);
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบโลโก้แล้ว"));
     assert.deepEqual(state.bottomBar.logoTemplate.image, { x: 12, y: -8, width: 260, height: 200 });
     assert.equal(JSON.stringify(state.bottomBar.cardTemplate ?? null), cardTemplateBefore,
@@ -735,6 +758,7 @@ async function main() {
     assert.equal(await monitor.$eval("#templateFontFields", el => el.hidden), false, "counters expose the font controls");
     await monitor.$eval("#templateFontManual", el => { el.value = "Menlo"; el.dispatchEvent(new Event("change")); });
     await monitor.$eval("#templateFontSize", el => { el.value = 140; el.dispatchEvent(new Event("change")); });
+    await reveal(monitor, "#templateFontWeight");
     await monitor.select("#templateFontWeight", "300");
     await monitor.$eval("#templateColorValue", el => { el.value = "#00cc66"; el.dispatchEvent(new Event("input")); });
     // The CSSOM drops the quotes around a family name that is a bare identifier.
@@ -745,7 +769,7 @@ async function main() {
     // carried none at all, so the panel and the stream could never agree.
     assert.equal(await monitor.$eval("#templateFontPreview", el => el.style.fontWeight), "300",
       "the sample carries the weight that was chosen");
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบตัวเลขแล้ว"));
     assert.equal(state.bottomBar.countTemplate.fontFamily, "Menlo");
     assert.equal(state.bottomBar.countTemplate.fontSize, 140);
@@ -754,7 +778,7 @@ async function main() {
     assert.equal(state.bottomBar.countTemplate.colors.red, "#e23c3c", "the other counter keeps its colour");
     await monitor.select("#selection", "count:red");
     await monitor.$eval("#templateColorValue", el => { el.value = "#ff0055"; el.dispatchEvent(new Event("input")); });
-    await monitor.click("#templateApply");
+    await press(monitor, "#templateApply");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบตัวเลขแล้ว"));
     assert.equal(state.bottomBar.countTemplate.colors.red, "#ff0055");
     assert.equal(state.bottomBar.countTemplate.colors.green, "#00cc66", "setting one colour keeps the other");
@@ -782,6 +806,7 @@ async function main() {
       getComputedStyle(board.querySelector('[data-target="count:red"] .count-value')).fontSynthesisWeight), "none",
       "the overlay never fakes a weight the font has no face for");
     // Space belongs to whatever field has focus before it belongs to the hand.
+    await reveal(monitor, "#templateFontManual");
     await monitor.focus("#templateFontManual");
     await monitor.keyboard.press("Space");
     assert.equal(await monitor.$eval("#frame", el => el.classList.contains("is-panning")), false,
@@ -836,11 +861,11 @@ async function main() {
     assert.equal(await monitor.$eval("#frame", el => el.classList.contains("is-panning")), false,
       "releasing Space puts the hand away");
 
-    await monitor.click("#canvasZoomActual");
+    await press(monitor, "#canvasZoomActual");
     const actual = await canvasInfo();
     assert.ok(Math.abs(actual.scale - 1) < 0.001, "1:1 shows the canvas at its own pixels");
     assert.equal(actual.label, "100%");
-    await monitor.click("#canvasZoomFit");
+    await press(monitor, "#canvasZoomFit");
     assert.ok(Math.abs((await canvasInfo()).scale - fitted.scale) < 0.002, "Fit returns to the framed view");
 
     // A drag has to follow the pointer in canvas pixels at whatever zoom is on
@@ -864,7 +889,7 @@ async function main() {
     // zoomed scale and not the fitted one, which would be three times further.
     assert.ok(Math.abs(moved.x - 60 / dragScale) < 30 && Math.abs(moved.y + 40 / dragScale) < 30,
       `a drag while zoomed follows the pointer: ${JSON.stringify(moved)} at scale ${dragScale}`);
-    await monitor.click("#canvasZoomFit");
+    await press(monitor, "#canvasZoomFit");
 
     // The template stage is the other preview and behaves the same way.
     await monitor.select("#selection", "count:red");
@@ -900,21 +925,21 @@ async function main() {
       Math.abs(stagePanned.top - stageZoomed.top - 20) < 2, "Space-drag pans the stage");
     assert.equal(JSON.stringify(state.bottomBar.countTemplate.value), boxBefore, "panning the stage edits no box");
     assert.equal(await monitor.$eval("#templateApply", el => el.disabled), true, "panning the stage dirties no draft");
-    await monitor.click("#templateFit");
+    await press(monitor, "#templateFit");
     console.log("PASS: cursor-anchored zoom, Space pan, 1:1/Fit and zoom-correct dragging");
     await monitor.select("#selection", "card:0");
     templateDelay = 500;
     await monitor.$eval("#templateOpacity", el => { el.value = 25; el.dispatchEvent(new Event("change")); });
-    await monitor.click("#templateApply");
-    await monitor.select("#editMode", "scoreboard");
-    await monitor.select("#editMode", "bottomBar");
+    await press(monitor, "#templateApply");
+    await setEditMode(monitor, "scoreboard");
+    await setEditMode(monitor, "bottomBar");
     await monitor.waitForFunction(() => document.getElementById("templateStatus").textContent.includes("ใช้แม่แบบกับทุกการ์ดแล้ว"));
     assert.equal(await monitor.$eval("#templateOpacity", el => el.value), "25", "mode round-trip refreshes saved template draft");
     templateDelay = 0;
     state.bottomBar.logoPresidentId = "missing"; push();
     await overlay.waitForFunction(() => board.querySelector('[data-target="logo"] img').hidden);
     assert.equal(await overlay.$eval('[data-target="logo"]', el => getComputedStyle(el).backgroundColor), "rgba(0, 0, 0, 0)");
-    await monitor.click("#templateFit");
+    await press(monitor, "#templateFit");
     await monitor.screenshot({ path: "/private/tmp/fff-bottom-bar-monitor.png" });
     await overlay.screenshot({ path: "/private/tmp/fff-bottom-bar-overlay.png", omitBackground: true });
     console.log("Clear precondition:", await overlay.evaluate(() => ({ visibility: document.visibilityState, stream: stream.readyState, phase: lastState.phase, transition: transition && { entering: transition.entering, generation: transition.generation } })));

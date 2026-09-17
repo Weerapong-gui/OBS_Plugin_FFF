@@ -254,9 +254,9 @@ const installEntranceHelper = () => {
         await page.waitForFunction(() => countRolls().length === 0, { polling: 20 });
         await page.screenshot({ path: "/private/tmp/fff-motion-rest.png", omitBackground: true });
         await monitor.evaluate(s => {
-          editMode = "bottomBar"; document.getElementById("editMode").value = editMode;
+          editMode = "bottomBar"; document.getElementById("editModeBottomBar").checked = true;
           render(s);
-          document.getElementById("editMode").dispatchEvent(new Event("change"));
+          document.getElementById("editModeBottomBar").dispatchEvent(new Event("change", { bubbles: true }));
         }, roster);
         await monitor.waitForFunction(() => countRolls().length === 0, { polling: 20 });
         await monitor.screenshot({ path: "/private/tmp/fff-motion-monitor.png" });
