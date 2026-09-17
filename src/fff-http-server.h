@@ -55,6 +55,9 @@ private:
 		QByteArray buffer;
 		bool sse = false;
 		bool overlay = false;
+		// A reply is already on its way, possibly after a delay. Anything else
+		// the client sends is read and dropped so it cannot be answered twice.
+		bool closing = false;
 		QString token;
 	};
 
@@ -74,7 +77,10 @@ private:
 	void sendHeartbeat();
 
 	void send(QTcpSocket *socket, int code, const QByteArray &contentType, const QByteArray &body,
-		  const QByteArray &cacheControl = "no-store");
+		  const QByteArray &cacheControl = "no-store", const QByteArray &extraHeaders = QByteArray());
+	// Refuses a route readFrom() did not admit, with the text that route has
+	// always answered. `delay` applies the wrong-PIN brake to a guessed key.
+	void sendDenied(QTcpSocket *socket, const QString &path, bool delay);
 	void sendJson(QTcpSocket *socket, int code, const QByteArray &json);
 	void sendWebFile(QTcpSocket *socket, const QString &name, const QByteArray &contentType);
 	void sendCard(QTcpSocket *socket, const QString &presidentId, const QString &kind = QStringLiteral("card"));

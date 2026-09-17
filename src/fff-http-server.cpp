@@ -5,6 +5,7 @@ GPL-2.0-or-later
 */
 
 #include "fff-http-server.h"
+#include "fff-monitor-access.h"
 #include "fff-session.h"
 
 #include <obs-module.h>
@@ -31,9 +32,9 @@ GPL-2.0-or-later
 namespace {
 
 constexpr int kMaxRequestBytes = 64 * 1024;
-// Artwork uploaded from the monitor is the only thing that outgrows the normal
-// cap, and the monitor is local. A phone on the venue's network keeps the small
-// one, so nothing reachable from the LAN can make the plugin buffer megabytes.
+// Artwork uploads are the only requests that outgrow the normal cap. Only this
+// machine and a LAN monitor holding the current key get the larger one, so a
+// phone on the venue's network still cannot make the plugin buffer megabytes.
 constexpr int kMaxUploadBytes = 8 * 1024 * 1024;
 constexpr int kHeartbeatMs = 15000;
 constexpr int kBadPinDelayMs = 1000;
@@ -43,6 +44,10 @@ QByteArray reasonPhrase(int code)
 	switch (code) {
 	case 200:
 		return "OK";
+	case 204:
+		return "No Content";
+	case 303:
+		return "See Other";
 	case 400:
 		return "Bad Request";
 	case 401:
@@ -58,6 +63,33 @@ QByteArray reasonPhrase(int code)
 	default:
 		return "Error";
 	}
+}
+
+// What each monitor route answered before LAN access existed, kept so a
+// refusal still names what was refused.
+QByteArray deniedText(const QString &path)
+{
+	static const QHash<QString, QByteArray> texts = {
+		{QStringLiteral("/api/events/overlay"), QByteArrayLiteral("overlay is local only")},
+		{QStringLiteral("/api/template"), QByteArrayLiteral("template is local only")},
+		{QStringLiteral("/api/status"), QByteArrayLiteral("status is local only")},
+		{QStringLiteral("/api/asset"), QByteArrayLiteral("uploads are local only")},
+		{QStringLiteral("/api/operator/vote"), QByteArrayLiteral("operator controls are local only")},
+		{QStringLiteral("/api/layout"), QByteArrayLiteral("layout is local only")},
+		{QStringLiteral("/api/layer"), QByteArrayLiteral("layer controls are local only")},
+	};
+	return texts.value(path, QByteArrayLiteral("monitor access required"));
+}
+
+QByteArray monitorDeniedPage()
+{
+	return QStringLiteral("<!doctype html><html lang=\"th\"><head><meta charset=\"utf-8\">"
+			      "<title>FFF Monitor</title></head>"
+			      "<body style=\"font-family:sans-serif;background:#0e1116;color:#f4f6f8;padding:32px\">"
+			      "<h1>เปิดจอมอนิเตอร์ไม่ได้</h1>"
+			      "<p>ต้องเปิดจากลิงก์ใน dock (แท็บ ตั้งค่า → Monitor LAN) และ operator ต้องเปิดสิทธิ์ไว้</p>"
+			      "</body></html>")
+		.toUtf8();
 }
 
 QString randomToken()
@@ -216,39 +248,68 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		return;
 
 	Conn &conn = it.value();
-	if (conn.sse) {
+	if (conn.sse || conn.closing) {
 		socket->readAll();
 		return;
 	}
 
 	conn.buffer.append(socket->readAll());
-	const int limit = socket->peerAddress().isLoopback() ? kMaxUploadBytes : kMaxRequestBytes;
-	if (conn.buffer.size() > limit) {
-		send(socket, 413, "text/plain; charset=utf-8", "too large");
-		return;
-	}
-
 	const int headerEnd = conn.buffer.indexOf("\r\n\r\n");
-	if (headerEnd < 0) {
-		// No headers yet, so nothing has earned the larger allowance.
+	if (headerEnd < 0 || headerEnd > kMaxRequestBytes) {
+		// Nothing has earned the upload allowance before its headers are read.
 		if (conn.buffer.size() > kMaxRequestBytes)
 			send(socket, 413, "text/plain; charset=utf-8", "too large");
 		return;
 	}
 
-	const QByteArray head = conn.buffer.left(headerEnd);
-	const QList<QByteArray> lines = head.split('\n');
-	if (lines.isEmpty()) {
+	const QList<QByteArray> lines = conn.buffer.left(headerEnd).split('\n');
+	const QList<QByteArray> parts = lines.at(0).trimmed().split(' ');
+	if (parts.size() < 2) {
 		send(socket, 400, "text/plain; charset=utf-8", "bad request");
 		return;
 	}
 
 	int contentLength = 0;
+	QByteArray cookieHeader;
 	for (int i = 1; i < lines.size(); ++i) {
 		const QByteArray line = lines.at(i).trimmed();
-		if (line.toLower().startsWith("content-length:"))
+		const QByteArray lower = line.toLower();
+		if (lower.startsWith("content-length:"))
 			contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
+		else if (lower.startsWith("cookie:"))
+			cookieHeader = line.mid(line.indexOf(':') + 1).trimmed();
 	}
+
+	const QByteArray method = parts.at(0);
+	const QUrl url = QUrl::fromEncoded(parts.at(1));
+	const QUrlQuery query(url);
+	const QString path = url.path();
+
+	FffMonitorAccess::Request access;
+	access.loopback = socket->peerAddress().isLoopback();
+	access.endpoint = FffMonitorAccess::classify(method, path);
+	access.enabled = m_session->monitorLanEnabled();
+	access.storedKey = m_session->monitorKey();
+	access.queryKey = query.queryItemValue(QStringLiteral("key"));
+	access.cookieKey = FffMonitorAccess::cookieValue(cookieHeader);
+
+	switch (FffMonitorAccess::decide(access)) {
+	case FffMonitorAccess::Decision::Deny:
+		sendDenied(socket, path, FffMonitorAccess::presentedWrongKey(access));
+		return;
+	case FffMonitorAccess::Decision::Redirect:
+		// Trade the key in the address bar for a cookie the page's own requests
+		// carry, and leave a clean URL behind.
+		send(socket, 303, "text/plain; charset=utf-8", QByteArray(), "no-store",
+		     "Location: /monitor\r\nSet-Cookie: " + FffMonitorAccess::setCookieHeader(access.storedKey) +
+			     "\r\n");
+		return;
+	case FffMonitorAccess::Decision::Allow:
+		break;
+	}
+
+	const bool uploader = access.loopback || access.endpoint == FffMonitorAccess::Endpoint::MonitorApi;
+	const int limit = uploader ? kMaxUploadBytes : kMaxRequestBytes;
 	if (contentLength < 0 || contentLength > limit) {
 		send(socket, 400, "text/plain; charset=utf-8", "bad request");
 		return;
@@ -257,16 +318,8 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		return;
 
 	const QByteArray body = conn.buffer.mid(headerEnd + 4, contentLength);
-	const QList<QByteArray> parts = lines.at(0).trimmed().split(' ');
-	if (parts.size() < 2) {
-		send(socket, 400, "text/plain; charset=utf-8", "bad request");
-		return;
-	}
-
-	const QUrl url = QUrl::fromEncoded(parts.at(1));
-	const QString token = QUrlQuery(url).queryItemValue(QStringLiteral("token"));
-	m_query = QUrlQuery(url);
-	route(socket, parts.at(0), url.path(), token, body);
+	m_query = query;
+	route(socket, method, path, query.queryItemValue(QStringLiteral("token")), body);
 }
 
 void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QString &path, const QString &token,
@@ -282,11 +335,8 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/monitor")) {
-			// Shows the flags before they go on air, same as the overlay feed.
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "monitor is local only");
-				return;
-			}
+			// Shows the flags before they go on air. readFrom() only lets this
+			// machine or a LAN monitor holding the current key get this far.
 			sendWebFile(socket, QStringLiteral("monitor.html"), "text/html; charset=utf-8");
 			return;
 		}
@@ -307,13 +357,18 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendWebFile(socket, QStringLiteral("view-zoom.js"), "application/javascript; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/monitor-ui.js")) {
+			sendWebFile(socket, QStringLiteral("monitor-ui.js"), "application/javascript; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/api/monitor/access")) {
+			// readFrom() refused anyone without access, so getting here is the answer.
+			send(socket, 204, "text/plain; charset=utf-8", QByteArray());
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
-			// The overlay sees every flag before the reveal, so it is
-			// only ever served to OBS on this machine.
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "overlay is local only");
-				return;
-			}
+			// Every flag before the reveal: this machine, or a LAN monitor
+			// holding the current key (see readFrom()).
 			startSse(socket, QString(), true);
 			return;
 		}
@@ -329,9 +384,9 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendCard(socket, QString(), QStringLiteral("cover"));
 			return;
 		}
-		for (const QString &kind : {QStringLiteral("bottomBar"), QStringLiteral("logo"),
-					    QStringLiteral("qualified"), QStringLiteral("unqualified"),
-					    QStringLiteral("waiting")}) {
+		for (const QString &kind :
+		     {QStringLiteral("bottomBar"), QStringLiteral("logo"), QStringLiteral("qualified"),
+		      QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
 			const QString prefix = QStringLiteral("/api/") + kind + QStringLiteral("/");
 			if (path.startsWith(prefix)) {
 				sendCard(socket, path.mid(prefix.size()), kind);
@@ -344,10 +399,6 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		}
 	} else if (method == "POST") {
 		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo")) {
-			if (!socket->peerAddress().isLoopback()) {
-				sendJson(socket, 403, "{\"error\":\"local only\"}");
-				return;
-			}
 			const auto request = QJsonDocument::fromJson(body).object();
 			const QString value = request.value(path == QLatin1String("/api/display")
 								    ? QStringLiteral("mode")
@@ -365,10 +416,6 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/api/template")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "template is local only");
-				return;
-			}
 			auto value = QJsonDocument::fromJson(body).object();
 			const QString mode = value.take(QStringLiteral("mode")).toString(QStringLiteral("scoreboard"));
 			const QString piece = value.take(QStringLiteral("piece")).toString(QStringLiteral("card"));
@@ -414,10 +461,6 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/api/status")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "status is local only");
-				return;
-			}
 			const auto request = QJsonDocument::fromJson(body).object();
 			const QString id = request.value(QStringLiteral("presidentId")).toString();
 			const QString status = request.value(QStringLiteral("status")).toString();
@@ -437,10 +480,6 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		// nothing a form encoding would add but a parser to get wrong. An empty body
 		// clears the artwork for that status.
 		if (path == QLatin1String("/api/asset")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "uploads are local only");
-				return;
-			}
 			const QString id = m_query.queryItemValue(QStringLiteral("presidentId"));
 			const QString kind = m_query.queryItemValue(QStringLiteral("kind"));
 			if (!FffSession::validStatusName(kind)) {
@@ -472,26 +511,14 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/api/operator/vote")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "operator controls are local only");
-				return;
-			}
 			handleOperatorVote(socket, body);
 			return;
 		}
 		if (path == QLatin1String("/api/layout")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "layout is local only");
-				return;
-			}
 			handleLayout(socket, body);
 			return;
 		}
 		if (path == QLatin1String("/api/layer")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "layer controls are local only");
-				return;
-			}
 			handleLayer(socket, body);
 			return;
 		}
@@ -722,18 +749,51 @@ void FffHttpServer::sendHeartbeat()
 }
 
 void FffHttpServer::send(QTcpSocket *socket, int code, const QByteArray &contentType, const QByteArray &body,
-			 const QByteArray &cacheControl)
+			 const QByteArray &cacheControl, const QByteArray &extraHeaders)
 {
+	// Every reply closes the connection, so nothing that arrives after it may
+	// start a second one.
+	auto it = m_conns.find(socket);
+	if (it != m_conns.end())
+		it.value().closing = true;
+
 	QByteArray response = "HTTP/1.1 " + QByteArray::number(code) + " " + reasonPhrase(code) + "\r\n";
 	response += "Content-Type: " + contentType + "\r\n";
 	response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
 	response += "Cache-Control: " + cacheControl + "\r\n";
+	response += extraHeaders;
 	response += "Connection: close\r\n\r\n";
 	response += body;
 
 	socket->write(response);
 	socket->flush();
 	socket->disconnectFromHost();
+}
+
+void FffHttpServer::sendDenied(QTcpSocket *socket, const QString &path, bool delay)
+{
+	auto it = m_conns.find(socket);
+	if (it != m_conns.end())
+		it.value().closing = true;
+
+	const auto reply = [this, path](QTcpSocket *target) {
+		if (path == QLatin1String("/monitor"))
+			send(target, 403, "text/html; charset=utf-8", monitorDeniedPage());
+		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
+			sendJson(target, 403, "{\"error\":\"local only\"}");
+		else
+			send(target, 403, "text/plain; charset=utf-8", deniedText(path));
+	};
+	if (!delay) {
+		reply(socket);
+		return;
+	}
+	// Same brake as a wrong PIN: guessing a key costs a second a try.
+	QPointer<QTcpSocket> guard(socket);
+	QTimer::singleShot(kBadPinDelayMs, this, [this, guard, reply]() {
+		if (guard && m_conns.contains(guard))
+			reply(guard);
+	});
 }
 
 void FffHttpServer::sendJson(QTcpSocket *socket, int code, const QByteArray &json)

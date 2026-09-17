@@ -33,7 +33,8 @@ and checking the Browser Source remains an integration smoke test.
 
 ## Layout interface
 
-`POST /api/layout` remains localhost-only. A piece update is
+`POST /api/layout` answers this machine, or another machine holding the current
+LAN monitor key (see Monitor LAN access). A piece update is
 `{"target":"card:<president-id>","layout":{"x":0.5,"y":0.5,"scale":1}}`;
 use `"heading"` for the title and round label. Centres are canvas fractions
 clamped to 0–1, with scale clamped to 0.5–2. Missing or nonnumeric layout values
@@ -45,7 +46,7 @@ grid to centre/100%. Requests without a target retain the original whole-board
 layout API. Session JSON and overlay SSE add a `pieces` object keyed by these
 targets; absent entries use the existing grid and legacy `layout` values.
 
-`POST /api/layer` ก็เป็น localhost-only และรับ
+`POST /api/layer` ใช้สิทธิ์แบบเดียวกับ layout และรับ
 `{"target":"card:<president-id>","action":"front|forward|backward|back"}`
 เพื่อจัดลำดับซ้อนของการ์ดหรือ `heading` แบบบันทึกถาวร. SSE state ส่ง `layers`
 เป็น map ของ target ไปยัง z-index; reset all ล้าง map นี้.
@@ -297,3 +298,9 @@ key persist in `session.json`, a malformed key loads switched off, failed writes
 roll back without announcing an access change, and neither value ever appears in
 overlay or phone state. OBS host stubs shared by the native tests live in
 `tests/obs-stubs.*`.
+
+Server checks connect through the machine's first LAN address, so the peer is
+not loopback. They cover the 403/303/cookie flow, the one-second brake on a
+wrong key, `GET /api/monitor/access`, the upload cap lifted only for a valid
+cookie, and on-air routes refusing the cookie. Without a LAN address they print
+`SKIP: no LAN address` and pass.
