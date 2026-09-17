@@ -284,3 +284,10 @@ The preview artwork uses portrait school specimens with transparent vote windows
 a central fixture logo and a transparent Cover containing only thin top rules.
 These graphics exist only in the test. Finished effects are settled and the
 compositor is given time to rasterize each frozen frame before capture.
+
+## Monitor LAN access
+
+`monitor-access-tests` covers the pure rules in `src/fff-monitor-access.*`: key
+format, constant-time comparison, cookie parsing, which routes belong to the
+monitor, and every allow/redirect/deny decision. `/api/display` and `/api/logo`
+stay local-only even with a valid key.
