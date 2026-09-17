@@ -92,6 +92,13 @@ if(ENABLE_QT AND ENABLE_FRONTEND_API)
     ${CMAKE_PROJECT_NAME}
     PRIVATE
       src/fff-dock.cpp
+      src/fff-dock-live.cpp
+      src/fff-dock-live.h
+      src/fff-dock-roster.cpp
+      src/fff-dock-roster.h
+      src/fff-dock-settings.cpp
+      src/fff-dock-settings.h
+      src/fff-dock-ui.h
       src/fff-http-server.cpp
       src/fff-http-server.h
       src/fff-monitor-access.cpp
