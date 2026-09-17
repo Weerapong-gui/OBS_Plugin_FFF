@@ -74,6 +74,9 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 		showError(QString());
 		refresh();
 	});
+	// Some session writes (a phone's vote, the monitor, a LAN monitor) never
+	// touch this panel, so a failure there only reaches the operator here.
+	connect(m_session, &FffSession::saveFailed, this, [this]() { showError(fffSaveErrorText()); });
 	connect(m_server, &FffHttpServer::clientsChanged, this, [this]() { refresh(); });
 	refresh();
 }

@@ -61,9 +61,10 @@ FffDock::FffDock()
 	m_server = new FffHttpServer(m_session, this);
 
 	// Come up listening so the operator has one less thing to remember.
-	QString error;
-	if (!m_server->start(m_session->port(), &error))
-		obs_log(LOG_WARNING, "could not start flag board: %s", error.toUtf8().constData());
+	QString startError;
+	const bool started = m_server->start(m_session->port(), &startError);
+	if (!started)
+		obs_log(LOG_WARNING, "could not start flag board: %s", startError.toUtf8().constData());
 
 	auto *root = new QVBoxLayout(this);
 	root->setContentsMargins(0, 0, 0, 0);
@@ -80,6 +81,9 @@ FffDock::FffDock()
 	m_tabs->insertTab(TabRoster, scrollable(roster), QStringLiteral("รายชื่อ"));
 	m_tabs->insertTab(TabSettings, scrollable(m_settings), QStringLiteral("ตั้งค่า"));
 	root->addWidget(m_tabs, 1);
+
+	if (!started)
+		m_settings->setStartError(QStringLiteral("เปิดพอร์ต %1 ไม่ได้: %2").arg(m_session->port()).arg(startError));
 
 	connect(liveTab, &FffLiveTab::errorRaised, live, &FffLivePanel::showError);
 	connect(roster, &FffRosterTab::errorRaised, live, &FffLivePanel::showError);

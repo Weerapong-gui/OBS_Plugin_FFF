@@ -133,6 +133,12 @@ bool FffSettingsTab::needsAttention() const
 	return !m_server->isListening() || FffHttpServer::lanAddresses().isEmpty();
 }
 
+void FffSettingsTab::setStartError(const QString &message)
+{
+	m_startError = message;
+	refresh();
+}
+
 void FffSettingsTab::refresh()
 {
 	const bool listening = m_server->isListening();

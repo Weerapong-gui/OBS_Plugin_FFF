@@ -123,6 +123,18 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	check(session.setVote(QStringLiteral("a"), FffVote::Green) && panel.error()->isHidden(),
 	      "the next successful change clears the error");
 
+	// F2: a save failure that never goes through the panel — a phone, the
+	// monitor or a LAN monitor calling FffSession directly — must still reach
+	// the operator via FffSession::saveFailed. Re-sends the same vote both
+	// times so the roster's vote state is unchanged for the checks below.
+	fffTestConfigPath = blockedConfig();
+	check(!session.setVote(QStringLiteral("a"), FffVote::Green), "a vote outside the panel fails while blocked");
+	check(!panel.error()->isHidden() && panel.error()->text() == fffSaveErrorText(),
+	      "saveFailed alone still surfaces in the panel");
+	fffTestConfigPath = config;
+	check(session.setVote(QStringLiteral("a"), FffVote::Green) && panel.error()->isHidden(),
+	      "the next successful change clears the error");
+
 	FffLiveTab live(&session);
 	check(live.votes()->count() == 2 && live.votes()->item(0)->text() == QStringLiteral("● เขียว · หนึ่ง") &&
 		      live.votes()->item(1)->text() == QStringLiteral("○ ยังไม่กด · สอง"),
@@ -252,10 +264,17 @@ static void testSettingsTab(FffSession &session, FffHttpServer &server)
 	settings.serverButton()->click();
 	check(!server.isListening() && asked.isEmpty() && settings.needsAttention(),
 	      "an idle server stops without a question and flags the tab");
+
+	// F5: FffDock passes on a startup port error (e.g. OBS launched with the
+	// port already taken) after the settings tab exists.
+	const QString startError = QStringLiteral("เปิดพอร์ต 9779 ไม่ได้: Address already in use");
+	settings.setStartError(startError);
+	check(settings.serverStatus()->text() == startError, "a startup error from FffDock shows in the settings tab");
+
 	settings.portField()->setValue(freePort());
 	settings.serverButton()->click();
 	check(server.isListening() && settings.serverStatus()->text().startsWith(QStringLiteral("กำลังฟังพอร์ต")),
-	      "start listens again on the chosen port");
+	      "start listens again on the chosen port and clears the startup error");
 }
 
 // F1: FffDock builds the session, then the server, then the panels as

@@ -34,6 +34,9 @@ public:
 	void refresh();
 	// The server is down or the machine has no LAN address; the dock marks the tab.
 	bool needsAttention() const;
+	// Reported by FffDock when the server could not start at OBS launch; shown
+	// in place of the generic "not started" status until the next start.
+	void setStartError(const QString &message);
 
 	QSpinBox *portField() const { return m_port; }
 	QPushButton *serverButton() const { return m_serverButton; }
