@@ -1,6 +1,7 @@
 // Exercise the real session and HTTP server with an isolated OBS config path.
 #include "fff-session.h"
 #include "fff-http-server.h"
+#include "obs-stubs.h"
 
 #include <obs-module.h>
 #include <QCoreApplication>
@@ -17,30 +18,6 @@
 #include <cstdlib>
 #include <cstring>
 
-static QString configPath;
-extern "C" {
-obs_module_t *obs_current_module(void)
-{
-	return nullptr;
-}
-char *obs_module_get_config_path(obs_module_t *, const char *file)
-{
-	return strdup(QDir(configPath).filePath(QString::fromUtf8(file)).toUtf8().constData());
-}
-char *obs_find_module_file(obs_module_t *, const char *)
-{
-	return nullptr;
-}
-void bfree(void *ptr)
-{
-	free(ptr);
-}
-int os_mkdirs(const char *path)
-{
-	return QDir().mkpath(QString::fromUtf8(path)) ? 0 : -1;
-}
-void obs_log(int, const char *, ...) {}
-}
 
 static void check(bool ok, const char *message)
 {
@@ -58,7 +35,7 @@ int main(int argc, char **argv)
 	QCoreApplication app(argc, argv);
 	QTemporaryDir temp;
 	check(temp.isValid(), "temporary config");
-	configPath = temp.path();
+	fffTestConfigPath = temp.path();
 	FffSession session;
 	check(session.setPort(session.port()), "unchanged port succeeds");
 	FffPresident person;
@@ -341,7 +318,7 @@ int main(int argc, char **argv)
 		// Counters shipped naming one of five font keys and took their colour
 		// from the stylesheet. Such a session has to keep the box it already
 		// has instead of losing the whole template.
-		const QString path = QDir(configPath).filePath(QStringLiteral("session.json"));
+		const QString path = QDir(fffTestConfigPath).filePath(QStringLiteral("session.json"));
 		QFile file(path);
 		check(file.open(QIODevice::ReadOnly), "read the saved session");
 		auto root = QJsonDocument::fromJson(file.readAll()).object();
@@ -595,7 +572,7 @@ int main(int argc, char **argv)
 	QFile blocked(temp.filePath(QStringLiteral("blocked")));
 	check(blocked.open(QIODevice::WriteOnly), "create blocked config");
 	blocked.close();
-	configPath = blocked.fileName();
+	fffTestConfigPath = blocked.fileName();
 	const auto beforeFailure = state(session);
 	auto changedTemplate = QJsonDocument::fromJson(cardTemplate).object();
 	auto resultLayer = changedTemplate.value("result").toObject();
@@ -620,7 +597,7 @@ int main(int argc, char **argv)
 	check(post(R"({"presidentId":"one","color":"red"})", QStringLiteral("operator/vote")) == 500,
 	      "failed operator vote reported");
 	check(state(session) == beforeFailure, "failed saves roll back");
-	configPath = temp.path();
+	fffTestConfigPath = temp.path();
 	session.removePresident(person.id);
 	check(session.logoPresidentId().isEmpty(), "deleting selected president clears logo");
 	check(!state(session).value("pieces").toObject().contains("card:one"), "remove cleans layout");

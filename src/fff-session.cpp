@@ -6,6 +6,8 @@ GPL-2.0-or-later
 
 #include "fff-session.h"
 
+#include "fff-monitor-access.h"
+
 #include <obs-module.h>
 #include <plugin-support.h>
 #include <util/platform.h>
@@ -448,6 +450,40 @@ bool FffSession::setPort(quint16 port)
 	return true;
 }
 
+bool FffSession::setMonitorLanEnabled(bool enabled)
+{
+	if (m_monitorLanEnabled == enabled && (!enabled || !m_monitorKey.isEmpty()))
+		return true;
+	const auto previousEnabled = m_monitorLanEnabled;
+	const auto previousKey = m_monitorKey;
+	m_monitorLanEnabled = enabled;
+	if (enabled && m_monitorKey.isEmpty())
+		m_monitorKey = FffMonitorAccess::generateKey();
+	if (!save()) {
+		m_monitorLanEnabled = previousEnabled;
+		m_monitorKey = previousKey;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	emit monitorAccessChanged();
+	return true;
+}
+
+bool FffSession::regenerateMonitorKey()
+{
+	const auto previousKey = m_monitorKey;
+	m_monitorKey = FffMonitorAccess::generateKey();
+	if (!save()) {
+		m_monitorKey = previousKey;
+		emit saveFailed();
+		return false;
+	}
+	emit changed();
+	emit monitorAccessChanged();
+	return true;
+}
+
 bool FffSession::setLayout(const FffLayout &layout, const QString &mode)
 {
 	if (!validMode(mode))
@@ -638,9 +674,9 @@ QStringList FffSession::assetPaths() const
 {
 	QStringList paths;
 	for (const FffPresident &president : m_presidents) {
-		for (const QString &kind : {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
-					    QStringLiteral("qualified"), QStringLiteral("unqualified"),
-					    QStringLiteral("waiting")}) {
+		for (const QString &kind :
+		     {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
+		      QStringLiteral("qualified"), QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
 			const QString path = assetPath(president, kind);
 			if (!path.isEmpty())
 				paths.append(path);
@@ -683,9 +719,9 @@ QString FffSession::importCard(const QString &path, const QString &id)
 
 QString FffSession::storeAsset(const QByteArray &png, const QString &kind)
 {
-	static const QStringList kinds = {QStringLiteral("card"),        QStringLiteral("bottomBar"),
-					  QStringLiteral("logo"),        QStringLiteral("cover"),
-					  QStringLiteral("qualified"),   QStringLiteral("unqualified"),
+	static const QStringList kinds = {QStringLiteral("card"),      QStringLiteral("bottomBar"),
+					  QStringLiteral("logo"),      QStringLiteral("cover"),
+					  QStringLiteral("qualified"), QStringLiteral("unqualified"),
 					  QStringLiteral("waiting")};
 	if (!kinds.contains(kind))
 		return QString();
@@ -806,6 +842,14 @@ void FffSession::load()
 
 	const int port = root.value(QStringLiteral("port")).toInt(9779);
 	m_port = (port > 0 && port <= 65535) ? static_cast<quint16>(port) : 9779;
+
+	// A key that is not one we minted switches LAN access off rather than
+	// letting a hand-edited file open the monitor.
+	static const QRegularExpression keyPattern(QStringLiteral("^[0-9a-f]{32}$"));
+	m_monitorKey = root.value(QStringLiteral("monitorKey")).toString();
+	if (!keyPattern.match(m_monitorKey).hasMatch())
+		m_monitorKey.clear();
+	m_monitorLanEnabled = root.value(QStringLiteral("monitorLanEnabled")).toBool(false) && !m_monitorKey.isEmpty();
 
 	m_displayMode = root.value(QStringLiteral("displayMode")).toString(QStringLiteral("scoreboard"));
 	if (!validMode(m_displayMode))
@@ -933,6 +977,8 @@ bool FffSession::save() const
 	if (!m_cardTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
+	root.insert(QStringLiteral("monitorLanEnabled"), m_monitorLanEnabled);
+	root.insert(QStringLiteral("monitorKey"), m_monitorKey);
 	root.insert(QStringLiteral("round"), m_round);
 	root.insert(QStringLiteral("phase"),
 		    m_phase == FffPhase::Revealed ? QStringLiteral("revealed") : QStringLiteral("collecting"));
@@ -995,8 +1041,8 @@ QByteArray FffSession::overlayStateJson() const
 		entry.insert(QStringLiteral("statusUrl"), statusUrl(president));
 		// Per-status URLs so the monitor can say which statuses already have
 		// artwork without guessing from the one that happens to be showing.
-		for (const QString &kind : {QStringLiteral("qualified"), QStringLiteral("unqualified"),
-					    QStringLiteral("waiting")})
+		for (const QString &kind :
+		     {QStringLiteral("qualified"), QStringLiteral("unqualified"), QStringLiteral("waiting")})
 			entry.insert(kind + QStringLiteral("Url"), assetUrl(president, kind));
 		entry.insert(QStringLiteral("vote"), voteName(voteOf(president.id)));
 		presidents.append(entry);

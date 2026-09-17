@@ -291,3 +291,9 @@ compositor is given time to rasterize each frozen frame before capture.
 format, constant-time comparison, cookie parsing, which routes belong to the
 monitor, and every allow/redirect/deny decision. `/api/display` and `/api/logo`
 stay local-only even with a valid key.
+
+`monitor-lan-tests` runs the real session and HTTP server. The LAN switch and
+key persist in `session.json`, a malformed key loads switched off, failed writes
+roll back without announcing an access change, and neither value ever appears in
+overlay or phone state. OBS host stubs shared by the native tests live in
+`tests/obs-stubs.*`.

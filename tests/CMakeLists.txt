@@ -7,7 +7,14 @@ find_package(Qt6 REQUIRED COMPONENTS Core Network)
 find_path(OBS_INCLUDE_DIR obs-module.h REQUIRED)
 
 enable_testing()
-add_executable(layout-tests layout-tests.cpp ../src/fff-session.cpp ../src/fff-http-server.cpp)
+add_executable(
+  layout-tests
+  layout-tests.cpp
+  obs-stubs.cpp
+  ../src/fff-session.cpp
+  ../src/fff-http-server.cpp
+  ../src/fff-monitor-access.cpp
+)
 target_include_directories(layout-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
 target_link_libraries(layout-tests PRIVATE Qt6::Core Qt6::Network)
 add_test(NAME layout-tests COMMAND layout-tests)
@@ -16,3 +23,15 @@ add_executable(monitor-access-tests monitor-access-tests.cpp ../src/fff-monitor-
 target_include_directories(monitor-access-tests PRIVATE ../src)
 target_link_libraries(monitor-access-tests PRIVATE Qt6::Core)
 add_test(NAME monitor-access-tests COMMAND monitor-access-tests)
+
+add_executable(
+  monitor-lan-tests
+  monitor-lan-tests.cpp
+  obs-stubs.cpp
+  ../src/fff-session.cpp
+  ../src/fff-http-server.cpp
+  ../src/fff-monitor-access.cpp
+)
+target_include_directories(monitor-lan-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
+target_link_libraries(monitor-lan-tests PRIVATE Qt6::Core Qt6::Network)
+add_test(NAME monitor-lan-tests COMMAND monitor-lan-tests)

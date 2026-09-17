@@ -88,6 +88,13 @@ public:
 	quint16 port() const { return m_port; }
 	bool setPort(quint16 port);
 
+	bool monitorLanEnabled() const { return m_monitorLanEnabled; }
+	QString monitorKey() const { return m_monitorKey; }
+	// Switching LAN access on mints the key the first time. The key outlives
+	// switching off, so only regenerateMonitorKey() retires a shared link.
+	bool setMonitorLanEnabled(bool enabled);
+	bool regenerateMonitorKey();
+
 	FffLayout layout(const QString &mode = QStringLiteral("scoreboard")) const
 	{
 		return mode == QLatin1String("bottomBar") ? m_bottomLayout : m_layout;
@@ -160,6 +167,9 @@ public:
 signals:
 	void changed();
 	void saveFailed();
+	// The LAN switch or key changed: connections admitted under the old
+	// rules have to go.
+	void monitorAccessChanged();
 
 private:
 	QString configDir() const;
@@ -179,6 +189,8 @@ private:
 	FffPhase m_phase = FffPhase::Collecting;
 	int m_round = 1;
 	quint16 m_port = 9779;
+	bool m_monitorLanEnabled = false;
+	QString m_monitorKey;
 	FffLayout m_layout;
 	QHash<QString, FffLayout> m_pieceLayouts;
 	QHash<QString, int> m_pieceLayers;
