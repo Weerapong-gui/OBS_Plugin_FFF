@@ -36,8 +36,8 @@ let motionGeneration = 0;
 let relayout = 0;
 
 const BOTTOM_TIMING = Object.freeze({
-  logo: 180, cover: 300, card: 450, firstPair: 80, pair: 45,
-  maxStagger: 420, exit: 240, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+  logo: 240, cover: 400, card: 600, firstPair: 100, pair: 60,
+  maxStagger: 560, exit: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
 });
 
 // The operator's press must never be the first time the browser hears about a
@@ -54,6 +54,10 @@ function warmAssets(state) {
     want(president.cardUrl, !bottom);
     want(president.bottomBarUrl, bottom);
     want(president.logoUrl, bottom && president.id === logoId);
+    // The other round of the centre logo is fetched too, so switching rounds
+    // on air never waits on the network.
+    want(president.logoRound1Url, false);
+    want(president.logoRound2Url, false);
   }
   want(state.bottomBar && state.bottomBar.coverUrl, bottom);
 

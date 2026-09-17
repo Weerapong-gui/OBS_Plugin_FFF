@@ -58,18 +58,18 @@ const installEntranceHelper = () => {
       const animation = motion.getAnimations().find(a => a.effect.getKeyframes().some(k => k.opacity !== undefined));
       return [piece.dataset.target, { timing: animation.effect.getTiming(), frames: animation.effect.getKeyframes() }];
     })));
-    assert.equal(entrance.logo.timing.duration, 180, "logo enters in 180ms");
-    assert.equal(entrance.cover.timing.duration, 300, "cover fades in 300ms");
+    assert.equal(entrance.logo.timing.duration, 240, "logo enters in 240ms");
+    assert.equal(entrance.cover.timing.duration, 400, "cover fades in 400ms");
     for (const target of ["card:a", "card:b"]) {
-      assert.equal(entrance[target].timing.duration, 450);
-      assert.equal(entrance[target].timing.delay, 80);
+      assert.equal(entrance[target].timing.duration, 600);
+      assert.equal(entrance[target].timing.delay, 100);
       assert.equal(entrance[target].timing.easing, "cubic-bezier(0.22, 1, 0.36, 1)");
       assert.match(entrance[target].frames[0].transform, /18px/);
       assert.ok(entrance[target].frames.some(frame => frame.clipPath && frame.clipPath !== "none"), "cards reveal through a clip");
     }
     assert.match(entrance.logo.frames[0].transform, /12px/);
     for (const target of ["count:red", "count:green"]) {
-      assert.equal(entrance[target].timing.duration, 180, "counters enter on the logo's timing");
+      assert.equal(entrance[target].timing.duration, 240, "counters enter on the logo's timing");
       assert.match(entrance[target].frames[0].transform, /12px/);
     }
     assert.ok(entrance.cover.frames.every(frame => !frame.transform || frame.transform === "none"), "cover never travels");
@@ -182,7 +182,7 @@ const installEntranceHelper = () => {
       if (capture) {
         await page.setViewport({ width: 1920, height: 1080 });
         await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(img => img.decode().catch(() => {}))); });
-        for (const time of [0, 180, 350, 600, 800]) {
+        for (const time of [0, 240, 470, 800, 1060]) {
           await page.evaluate(async time => {
             for (const a of entranceAnimations()) {
               if (time >= a.effect.getComputedTiming().endTime) a.finish();
@@ -204,8 +204,8 @@ const installEntranceHelper = () => {
       assert.equal(entries.length, count);
       for (let i = 0; i < count; i++) {
         const half = Math.ceil(count / 2), pair = i < half ? half - 1 - i : i - half;
-        assert.equal(entries[i].timing.delay, 80 + Math.min(pair * 45, 420), `roster ${count} card ${i} center-out delay`);
-        assert.equal(entries[i].timing.duration, 450);
+        assert.equal(entries[i].timing.delay, 100 + Math.min(pair * 60, 560), `roster ${count} card ${i} center-out delay`);
+        assert.equal(entries[i].timing.duration, 600);
         if (i % 2) assert.equal(entries[i].wipeVisible, false, "waiting card never paints vote wipe");
       }
       if (count > 1) {
@@ -338,6 +338,9 @@ const installEntranceHelper = () => {
     assert.ok(await overlay.evaluate(() => countRolls().length) > 0, "coming back on air rolls again");
     await overlay.waitForFunction(() => countRolls().length === 0, { polling: 20 });
     assert.deepEqual(await counters(), { "count:red": "0", "count:green": "1" }, "the fresh roll lands on the live tally");
+    // The counter roll settles on its own clock, shorter than the bottom bar's
+    // entrance; wait for the entrance itself before treating the board as at rest.
+    await overlay.waitForFunction(() => entranceAnimations().length === 0, { polling: 20 });
     const coverInfo = page => page.evaluate(() => {
       const p = board.querySelector('[data-target="cover"]');
       return { width: p.offsetWidth, height: p.offsetHeight, transform: p.style.transform,
@@ -402,7 +405,7 @@ const installEntranceHelper = () => {
       const decoration = ["logo", "cover"].map(target => board.querySelector(`[data-target="${target}"] .bottom-motion`).getAnimations()[0].effect.getKeyframes());
       return { sampled, first: frames[0], last: frames.at(-1), timing: a.effect.getTiming(), decoration };
     }, state);
-    assert.equal(exitSample.timing.duration, 240);
+    assert.equal(exitSample.timing.duration, 320);
     assert.ok(Math.abs(Number(exitSample.first.opacity) - Number(exitSample.sampled.opacity)) < 0.001, "exit starts at current opacity");
     assert.equal(exitSample.first.transform, exitSample.sampled.transform, "exit starts at current transform");
     assert.equal(exitSample.first.clipPath, exitSample.sampled.clipPath, "exit keeps current reveal extent");
@@ -486,7 +489,8 @@ const installEntranceHelper = () => {
       layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {},
       bottomBar: { coverUrl: asset + "cover.png", pieces: {}, layers: {}, logoPresidentId: "a" },
       presidents: ["a", "b", "c"].map(id => ({ id, name: id, school: "S", vote: "none",
-        bottomBarUrl: `${asset}${id}.png`, logoUrl: `${asset}${id}-logo.png` })) };
+        bottomBarUrl: `${asset}${id}.png`, logoUrl: `${asset}${id}-logo.png`,
+        logoRound1Url: `${asset}${id}-logo.png`, logoRound2Url: `${asset}${id}-logo2.png` })) };
     await warm.evaluate(s => render(s), warming);
     await warm.waitForFunction(() => warmed.size > 0 && [...warmed.values()].every(image => image.complete),
       { polling: 20 });
@@ -524,6 +528,21 @@ const installEntranceHelper = () => {
     assert.ok(opened.animating > 0, "the entrance starts in the same task");
     await warm.waitForFunction(() => !transition, { polling: 20 });
     assert.equal(JSON.stringify([...served].sort()), beforeReveal, "revealing fetches nothing");
+    // Switching the centre logo to round 2 on air uses artwork fetched before
+    // the press, so the logo changes without touching the network.
+    const switched = await warm.evaluate(s => {
+      const round2 = { ...s, phase: "revealed", bottomBar: { ...s.bottomBar, logoRound: 2 },
+        presidents: s.presidents.map(p => ({ ...p, logoUrl: p.logoRound2Url })) };
+      render(round2);
+      const logo = board.querySelector('[data-target="logo"] img');
+      const shown = logo.getAttribute("src");
+      render({ ...round2, presidents: round2.presidents.map(p => p.id === "a" ? { ...p, logoUrl: "" } : p) });
+      return { shown, missing: logo.hasAttribute("src") };
+    }, warming);
+    assert.ok(switched.shown.endsWith("/img/a-logo2.png"), "round 2 puts round 2 artwork in the centre");
+    assert.equal(switched.missing, false, "a school without round 2 artwork leaves the centre empty");
+    assert.equal(JSON.stringify([...served].sort()), beforeReveal, "switching rounds fetches nothing");
+    await warm.evaluate(s => render({ ...s, phase: "revealed" }), warming);
     // A mode button pressed twice blanks the stream without ending the round,
     // so the same votes have to be able to come straight back.
     const hidden = { ...warming, phase: "revealed" };
@@ -535,7 +554,7 @@ const installEntranceHelper = () => {
       duration: board.querySelector('[data-target="card:a"] .bottom-motion').getAnimations()[0].effect.getTiming().duration
     }));
     assert.equal(exiting.entering, false, "hiding plays the exit, not a cut");
-    assert.equal(exiting.duration, 240, "hiding uses the documented exit timing");
+    assert.equal(exiting.duration, 320, "hiding uses the documented exit timing");
     await warm.waitForFunction(() => wrap.hidden, { polling: 20 });
     const restored = await warm.evaluate(s => {
       render(s);
@@ -553,8 +572,8 @@ const installEntranceHelper = () => {
         bottomBar: { ...s.bottomBar, coverUrl: "" }, phase: "collecting", round: s.round + 1 });
       return { full, trimmed: warmed.size };
     }, warming);
-    assert.equal(warmedSizes.full, 7, "three cards, three logos and a cover are warmed");
-    assert.equal(warmedSizes.trimmed, 2, "artwork that left the roster is dropped");
+    assert.equal(warmedSizes.full, 10, "three cards, three logos per round and a cover are warmed");
+    assert.equal(warmedSizes.trimmed, 3, "artwork that left the roster is dropped");
     await warm.close();
 
     assert.deepEqual(errors, []);

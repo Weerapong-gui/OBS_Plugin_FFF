@@ -266,8 +266,8 @@ cmake --build --preset macos
 ```
 
 The focused cover suite checks the actual Web Animations timings: logo and both
-counters 180ms, cover 300ms, cards 450ms with an 80ms start and center-out pairs 45ms apart
-(stagger capped at 420ms), and interrupted exits 240ms. It samples animation
+counters 240ms, cover 400ms, cards 600ms with a 100ms start and center-out pairs 60ms apart
+(stagger capped at 560ms), and interrupted exits 320ms. It samples animation
 progress directly, exercises roster changes and template overflow during entry,
 and checks that resting Overlay and Monitor retain no temporary wipe or clip.
 Live vote updates must leave existing pieces attached; roster reordering keeps
@@ -275,10 +275,12 @@ their identities and in-flight animations. Counter rolls are motion of their
 own, so the entrance checks read `entranceAnimations()`, which filters them out,
 and `countRolls()` covers them directly. Resting pieces also release animation
 transforms and compositor hints (`will-change`).
-The 14-card entrance ends at 800ms; the maximum entrance is 950ms.
+The 14-card entrance ends at 1060ms; the maximum entrance is 1260ms. Switching the
+centre logo between Round 1 and Round 2 on air uses artwork fetched before the
+press, and a school without Round 2 artwork leaves the centre empty.
 
 Set `FFF_MOTION_SCREENSHOTS=1` for deterministic 1920×1080 fixture captures:
-`/private/tmp/fff-motion-{0,180,350,600,800,rest,monitor}.png`. The test pauses
+`/private/tmp/fff-motion-{0,240,470,800,1060,rest,monitor}.png`. The test pauses
 Web Animations at the requested times and uses synthetic transparent PNGs;
 it never reads or writes the real OBS session.
 The preview artwork uses portrait school specimens with transparent vote windows,
