@@ -2,7 +2,7 @@
 
 Plugin ของสโมสรนักศึกษา มฟล. สร้างจาก [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)
 
-มีอะไรข้างใน (v0.2.0):
+มีอะไรข้างใน (v0.3.0):
 - **FFF Flag Board** — dock คุมกระดานผลการออกธงของนายกแต่ละสำนักวิชา คนดูกดสีธงจากมือถือ ผลขึ้นจอสตรีมผ่าน Browser Source: เมนู Docks → FFF Flag Board
 - **FFF Tint** — video filter ย้อมสีภาพ (ตัวอย่างโครง filter): คลิกขวาที่ source → Filters → + → FFF Tint
 
@@ -61,7 +61,7 @@ sudo apt update && sudo apt install obs-studio
 เปิด OBS → Help → Log Files → View Current Log ต้องเจอ:
 
 ```
-[fff-tools] plugin loaded successfully (version 0.2.0)
+[fff-tools] plugin loaded successfully (version 0.3.0)
 [fff-tools] flag board listening on port 9779
 ```
 
@@ -191,7 +191,7 @@ cmake --preset macos
 แล้วปิด-เปิด OBS ใหม่ ดูใน log (Help → Log Files → View Current Log) ต้องเจอ:
 
 ```
-[fff-tools] plugin loaded successfully (version 0.2.0)
+[fff-tools] plugin loaded successfully (version 0.3.0)
 [fff-tools] flag board listening on port 9779
 ```
 
@@ -209,7 +209,7 @@ cmake --preset macos
 
 1. แก้ `"version"` ใน `buildspec.json` — ชื่อไฟล์ทุกตัวมาจากที่นี่ **tag ไม่ได้ป้อนเวอร์ชันให้ build**
 2. commit แล้ว merge เข้า `main`
-3. `git tag 0.2.0 && git push origin 0.2.0` (รับ `v0.2.0` ด้วย ตัว `v` ถูกตัดทิ้ง) — ถ้า tag ไม่ตรงกับ `buildspec.json` workflow จะล้มพร้อมบอกเหตุผล
+3. `git tag 0.3.0 && git push origin 0.3.0` (รับ `v0.3.0` ด้วย ตัว `v` ถูกตัดทิ้ง) — ถ้า tag ไม่ตรงกับ `buildspec.json` workflow จะล้มพร้อมบอกเหตุผล
 4. Actions build ทั้ง 3 OS แล้วสร้าง **draft release** พร้อมไฟล์แนบไว้ — เข้าไปตรวจแล้วกด Publish เอง
 
 ## โครงโค้ด
