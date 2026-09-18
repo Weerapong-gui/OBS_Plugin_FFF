@@ -17,8 +17,10 @@ Plugin ของสโมสรนักศึกษา มฟล. สร้า�
 | Windows x64 | `fff-tools-<version>-windows-x64.exe` | ตัวติดตั้ง ลง `%ProgramData%\obs-studio\plugins` (ขอสิทธิ์ admin) |
 | Linux (Ubuntu 24.04 x86_64) | `fff-tools-<version>-x86_64-linux-gnu.deb` | `sudo apt install ./fff-tools-<version>-x86_64-linux-gnu.deb` |
 
-มีไฟล์สำรองให้ด้วยถ้าไม่อยากใช้ตัวติดตั้ง: `.tar.xz` (macOS/Linux) และ `.zip` (Windows)
+Windows มี `fff-tools-<version>-windows-x64.zip` ให้ด้วยถ้าไม่อยากใช้ตัวติดตั้ง
 — แตกแล้วเอาโฟลเดอร์ `fff-tools` ไปวางในโฟลเดอร์ plugins ของ OBS เอง
+macOS และ Linux มีเฉพาะตัวติดตั้ง — release ที่แนบไฟล์ติดตั้งมาด้วยจะไม่ได้ทำ `.tar.xz` คู่กัน
+(`fff-tools-<version>-source.tar.xz` คือซอร์สโค้ด ไม่ใช่ปลั๊กอินที่ build แล้ว)
 
 ### macOS: การ์ดขึ้นว่า "ไม่สามารถเปิดได้"
 
