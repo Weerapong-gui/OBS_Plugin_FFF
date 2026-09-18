@@ -39,7 +39,7 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core Network)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Core Network)
 
   # Qt 6.8 links AGL alongside OpenGL, but the macOS 26 SDK no longer ships
   # AGL.framework (only a runtime stub under /System remains, which the linker

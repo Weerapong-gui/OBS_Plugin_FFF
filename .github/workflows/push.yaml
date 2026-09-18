@@ -34,6 +34,10 @@ jobs:
       run:
         shell: bash
     steps:
+      # buildspec.json is read below, and the artifacts arrive as sibling
+      # directories that match none of the repository's own names.
+      - uses: actions/checkout@v4
+
       - name: Check Release Tag ☑️
         id: check
         run: |
@@ -41,19 +45,39 @@ jobs:
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
           shopt -s extglob
 
-          case "${GITHUB_REF_NAME}" in
+          # A 'v' prefix is the habit of every other project, and a tag that
+          # silently produces no release at all is the worst way to learn this
+          # one does not use it. Accept both and strip it.
+          version="${GITHUB_REF_NAME#v}"
+
+          valid=false
+          case "${version}" in
             +([0-9]).+([0-9]).+([0-9]) )
+              valid=true
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=false' >> $GITHUB_OUTPUT
-              echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+              echo "version=${version}" >> $GITHUB_OUTPUT
               ;;
             +([0-9]).+([0-9]).+([0-9])-@(beta|rc)*([0-9]) )
+              valid=true
               echo 'validTag=true' >> $GITHUB_OUTPUT
               echo 'prerelease=true' >> $GITHUB_OUTPUT
-              echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+              echo "version=${version}" >> $GITHUB_OUTPUT
               ;;
             *) echo 'validTag=false' >> $GITHUB_OUTPUT ;;
           esac
+
+          # The artifacts are named from buildspec.json, which the tag never
+          # feeds. A release labelled one version holding files named another
+          # is a support ticket waiting to happen. A tag that is not a version
+          # at all is not this job's business and is left alone.
+          if [[ "${valid}" == true ]]; then
+            spec="$(jq -r '.version' buildspec.json)"
+            if [[ "${version}" != "${spec}" ]]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} does not match buildspec.json version ${spec}"
+              exit 1
+            fi
+          fi
 
       - name: Download Build Artifacts 📥
         uses: actions/download-artifact@v4

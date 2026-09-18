@@ -2,9 +2,55 @@
 
 Plugin ของสโมสรนักศึกษา มฟล. สร้างจาก [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)
 
-มีอะไรข้างใน (v0.1.0):
+มีอะไรข้างใน (v0.2.0):
 - **FFF Flag Board** — dock คุมกระดานผลการออกธงของนายกแต่ละสำนักวิชา คนดูกดสีธงจากมือถือ ผลขึ้นจอสตรีมผ่าน Browser Source: เมนู Docks → FFF Flag Board
 - **FFF Tint** — video filter ย้อมสีภาพ (ตัวอย่างโครง filter): คลิกขวาที่ source → Filters → + → FFF Tint
+
+## ติดตั้ง
+
+โหลดไฟล์จาก [Releases](https://github.com/Weerapong-gui/OBS_Plugin_FFF/releases)
+ต้องมี **OBS Studio 30 ขึ้นไป** และต้องปิด OBS ก่อนติดตั้งทุกครั้ง
+
+| OS | ไฟล์ | วิธี |
+|---|---|---|
+| macOS (Apple Silicon + Intel) | `fff-tools-<version>-macos-universal.pkg` | ดับเบิลคลิก ติดตั้งลง `~/Library/Application Support/obs-studio/plugins` |
+| Windows x64 | `fff-tools-<version>-windows-x64.exe` | ตัวติดตั้ง ลง `%ProgramData%\obs-studio\plugins` (ขอสิทธิ์ admin) |
+| Linux (Ubuntu 24.04 x86_64) | `fff-tools-<version>-x86_64-linux-gnu.deb` | `sudo apt install ./fff-tools-<version>-x86_64-linux-gnu.deb` |
+
+มีไฟล์สำรองให้ด้วยถ้าไม่อยากใช้ตัวติดตั้ง: `.tar.xz` (macOS/Linux) และ `.zip` (Windows)
+— แตกแล้วเอาโฟลเดอร์ `fff-tools` ไปวางในโฟลเดอร์ plugins ของ OBS เอง
+
+### macOS: การ์ดขึ้นว่า "ไม่สามารถเปิดได้"
+
+`.pkg` **ไม่ได้เซ็นและไม่ผ่าน notarization** (โปรเจกต์นักศึกษา ไม่มี Apple Developer account)
+Gatekeeper จึงบล็อกไว้ มีสองทาง:
+
+1. ดับเบิลคลิกไฟล์ จะขึ้นว่าเปิดไม่ได้ → ไปที่ System Settings → Privacy & Security → เลื่อนลงล่างสุด → **Open Anyway**
+2. หรือสั่งเองก่อนเปิด:
+
+```sh
+xattr -dr com.apple.quarantine ~/Downloads/fff-tools-*-macos-universal.pkg
+```
+
+### Linux
+
+`.deb` ถูก build กับ OBS จาก `ppa:obsproject/obs-studio` ถ้าใช้ OBS จาก Flatpak หรือ Snap ปลั๊กอินจะไม่ถูกโหลด:
+
+```sh
+sudo add-apt-repository ppa:obsproject/obs-studio
+sudo apt update && sudo apt install obs-studio
+```
+
+### เช็คว่าโหลดสำเร็จ
+
+เปิด OBS → Help → Log Files → View Current Log ต้องเจอ:
+
+```
+[fff-tools] plugin loaded successfully (version 0.2.0)
+[fff-tools] flag board listening on port 9779
+```
+
+ปลั๊กอินเปิด HTTP server บนเครื่องที่ติดตั้ง (ค่าเริ่มต้นพอร์ต 9779) เปลี่ยนพอร์ตได้ในแท็บตั้งค่าของ dock
 
 ## Flag Board ทำงานยังไง
 
@@ -130,7 +176,7 @@ cmake --preset macos
 แล้วปิด-เปิด OBS ใหม่ ดูใน log (Help → Log Files → View Current Log) ต้องเจอ:
 
 ```
-[fff-tools] plugin loaded successfully (version 0.1.0)
+[fff-tools] plugin loaded successfully (version 0.2.0)
 [fff-tools] flag board listening on port 9779
 ```
 
@@ -143,6 +189,13 @@ cmake --preset macos
 - **Windows**: `cmake --preset windows-x64` แล้ว `cmake --build --preset windows-x64 --config RelWithDebInfo` (ต้อง VS2022 + Windows SDK 10.0.22621)
 - **Ubuntu 24.04**: `cmake --preset ubuntu-x86_64` แล้ว `cmake --build --preset ubuntu-x86_64`
 - หรือ push ขึ้น GitHub แล้วให้ Actions build ทั้ง 3 OS ให้ (ดูแท็บ Actions → Artifacts)
+
+## ออกเวอร์ชันใหม่
+
+1. แก้ `"version"` ใน `buildspec.json` — ชื่อไฟล์ทุกตัวมาจากที่นี่ **tag ไม่ได้ป้อนเวอร์ชันให้ build**
+2. commit แล้ว merge เข้า `main`
+3. `git tag 0.2.0 && git push origin 0.2.0` (รับ `v0.2.0` ด้วย ตัว `v` ถูกตัดทิ้ง) — ถ้า tag ไม่ตรงกับ `buildspec.json` workflow จะล้มพร้อมบอกเหตุผล
+4. Actions build ทั้ง 3 OS แล้วสร้าง **draft release** พร้อมไฟล์แนบไว้ — เข้าไปตรวจแล้วกด Publish เอง
 
 ## โครงโค้ด
 
