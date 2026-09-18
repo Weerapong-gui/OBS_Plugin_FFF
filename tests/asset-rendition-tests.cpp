@@ -94,10 +94,9 @@ static void testServing(const QTemporaryDir &temp)
 	FffPresident person;
 	person.id = QStringLiteral("p");
 	person.pin = QStringLiteral("123456");
-	person.bottomBar = session.importAsset(temp.filePath(QStringLiteral("big.png")), person.id,
-					       QStringLiteral("bottomBar"));
-	person.logo =
-		session.importAsset(temp.filePath(QStringLiteral("fits.png")), person.id, QStringLiteral("logo"));
+	person.bottomBar =
+		session.importAsset(temp.filePath(QStringLiteral("big.png")), person.id, QStringLiteral("bottomBar"));
+	person.logo = session.importAsset(temp.filePath(QStringLiteral("fits.png")), person.id, QStringLiteral("logo"));
 	check(!person.bottomBar.isEmpty() && !person.logo.isEmpty() && session.addPresident(person),
 	      "roster with large and small artwork");
 	const FffPresident &stored = *session.presidentById(person.id);
@@ -111,8 +110,8 @@ static void testServing(const QTemporaryDir &temp)
 	check(server.start(0, &error), "HTTP starts");
 	QNetworkAccessManager network;
 	const auto get = [&](const QString &url) {
-		auto *reply = network.get(
-			QNetworkRequest(QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(server.boundPort()).arg(url))));
+		auto *reply = network.get(QNetworkRequest(
+			QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(server.boundPort()).arg(url))));
 		QEventLoop loop;
 		QTimer timer;
 		timer.setSingleShot(true);
@@ -144,8 +143,8 @@ static void testServing(const QTemporaryDir &temp)
 
 	// Renditions are made as soon as artwork enters the session, before any
 	// page asks, so the heavy work never lands on a reveal.
-	const QString cover = session.importAsset(temp.filePath(QStringLiteral("big.png")), QString(),
-						  QStringLiteral("cover"));
+	const QString cover =
+		session.importAsset(temp.filePath(QStringLiteral("big.png")), QString(), QStringLiteral("cover"));
 	check(!cover.isEmpty() && session.setCover(cover), "select a large cover");
 	check(waitFor([&]() { return QFile::exists(QDir(cards).filePath(QStringLiteral("renditions/") + cover)); }),
 	      "a new asset is shrunk without being requested");

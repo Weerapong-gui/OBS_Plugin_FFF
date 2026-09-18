@@ -37,9 +37,8 @@ int main(int argc, char **argv)
 	check(classify("GET", QStringLiteral("/monitor")) == Endpoint::MonitorPage, "monitor page");
 	for (const char *path : {"/api/events/overlay", "/api/monitor/access"})
 		check(classify("GET", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor reads");
-	for (const char *path :
-	     {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset", "/api/template",
-	      "/api/timing"})
+	for (const char *path : {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset",
+				 "/api/template", "/api/timing"})
 		check(classify("POST", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor writes");
 	for (const char *path : {"/api/display", "/api/logo"})
 		check(classify("POST", QString::fromLatin1(path)) == Endpoint::LocalOnly, "on-air controls");
@@ -68,7 +67,8 @@ int main(int argc, char **argv)
 	      "this machine keeps on-air controls");
 	check(decide(request(true, Endpoint::MonitorPage, false, none, none)) == Decision::Allow,
 	      "this machine opens the monitor without a key");
-	check(decide(request(false, Endpoint::Public, false, none, none)) == Decision::Allow, "public routes stay open");
+	check(decide(request(false, Endpoint::Public, false, none, none)) == Decision::Allow,
+	      "public routes stay open");
 	check(decide(request(false, Endpoint::LocalOnly, true, stored, stored)) == Decision::Deny,
 	      "a LAN monitor never reaches on-air controls");
 	check(decide(request(false, Endpoint::MonitorPage, false, stored, none)) == Decision::Deny,

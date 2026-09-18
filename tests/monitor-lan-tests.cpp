@@ -100,8 +100,7 @@ static void testSession(FffSession &session, const QTemporaryDir &temp)
 {
 	check(!session.monitorLanEnabled() && session.monitorKey().isEmpty(), "LAN monitor starts off without a key");
 	int accessChanges = 0;
-	const auto counter =
-		QObject::connect(&session, &FffSession::monitorAccessChanged, [&]() { ++accessChanges; });
+	const auto counter = QObject::connect(&session, &FffSession::monitorAccessChanged, [&]() { ++accessChanges; });
 
 	check(session.setMonitorLanEnabled(true), "switch LAN monitor on");
 	const QString firstKey = session.monitorKey();
@@ -157,7 +156,8 @@ static void testServer(FffSession &session, FffHttpServer &server)
 	const QString local = QStringLiteral("127.0.0.1");
 
 	check(statusOf(call("GET", local, "/api/monitor/access")) == 204, "this machine passes the access probe");
-	check(bodyOf(call("GET", local, "/monitor-ui.js")) == "missing asset", "monitor-ui.js is routed to the web folder");
+	check(bodyOf(call("GET", local, "/monitor-ui.js")) == "missing asset",
+	      "monitor-ui.js is routed to the web folder");
 	check(statusOf(call("POST", local, "/api/display", QByteArray(), R"({"mode":"scoreboard"})")) == 200 &&
 		      session.phase() == FffPhase::Revealed,
 	      "this machine still drives the display");
@@ -212,8 +212,10 @@ static void testServer(FffSession &session, FffHttpServer &server)
 	const QByteArray large(100 * 1024, 'x');
 	const QByteArray upload = call("POST", host, "/api/asset?presidentId=lan&kind=qualified", cookie, large);
 	check(statusOf(upload) == 400 && bodyOf(upload).contains("not a PNG"), "the cookie lifts the LAN upload cap");
-	const QByteArray stranger = call("POST", host, "/api/asset?presidentId=lan&kind=qualified", QByteArray(), large);
-	check(!bodyOf(stranger).contains("not a PNG") && session.presidentById(QStringLiteral("lan"))->qualified.isEmpty(),
+	const QByteArray stranger =
+		call("POST", host, "/api/asset?presidentId=lan&kind=qualified", QByteArray(), large);
+	check(!bodyOf(stranger).contains("not a PNG") &&
+		      session.presidentById(QStringLiteral("lan"))->qualified.isEmpty(),
 	      "strangers never reach the upload handler");
 
 	check(session.setMonitorLanEnabled(false), "switch LAN monitor off again");

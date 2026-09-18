@@ -65,7 +65,8 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 		      !panel.summary()->property("fffReady").toBool(),
 	      "summary counts votes");
 
-	check(session.setVote(QStringLiteral("a"), FffVote::Green) && session.setVote(QStringLiteral("b"), FffVote::Red),
+	check(session.setVote(QStringLiteral("a"), FffVote::Green) &&
+		      session.setVote(QStringLiteral("b"), FffVote::Red),
 	      "everyone votes");
 	check(panel.summary()->text() == QStringLiteral("รอบ 1 · ✓ ครบ 2/2 พร้อมขึ้นจอ") &&
 		      panel.summary()->property("fffReady").toBool(),
@@ -230,8 +231,10 @@ static void testRosterTab(FffSession &session)
 
 	check(roster.chooseAction(QStringLiteral("logo2"))->isEnabled() &&
 		      !roster.clearAction(QStringLiteral("logo2"))->isEnabled() &&
-		      roster.chooseAction(QStringLiteral("logo2"))->text() == QStringLiteral("เลือกโลโก้กลาง Round 2 PNG…") &&
-		      roster.chooseAction(QStringLiteral("logo"))->text() == QStringLiteral("เลือกโลโก้กลาง Round 1 PNG…"),
+		      roster.chooseAction(QStringLiteral("logo2"))->text() ==
+			      QStringLiteral("เลือกโลโก้กลาง Round 2 PNG…") &&
+		      roster.chooseAction(QStringLiteral("logo"))->text() ==
+			      QStringLiteral("เลือกโลโก้กลาง Round 1 PNG…"),
 	      "round 2 logo artwork can be chosen once a row is selected");
 	FffPresident withLogo2 = *session.presidentById(QStringLiteral("a"));
 	withLogo2.logo2 = QStringLiteral("logo2-test.png");
@@ -320,7 +323,8 @@ static void testSettingsTab(FffSession &session, FffHttpServer &server)
 	const QString config = fffTestConfigPath;
 	fffTestConfigPath = blockedConfig();
 	settings.lanToggle()->setChecked(false);
-	check(session.monitorLanEnabled() && settings.lanToggle()->isChecked(), "a failed switch-off restores the checkbox");
+	check(session.monitorLanEnabled() && settings.lanToggle()->isChecked(),
+	      "a failed switch-off restores the checkbox");
 	fffTestConfigPath = config;
 	settings.lanToggle()->setChecked(false);
 	check(!session.monitorLanEnabled() && settings.lanDetails()->isHidden(), "switching off hides the link");
@@ -373,7 +377,8 @@ int main(int argc, char **argv)
 
 	FffSession session;
 	check(session.addPresident(president(QStringLiteral("a"), QStringLiteral("หนึ่ง"), QStringLiteral("111111"))) &&
-		      session.addPresident(president(QStringLiteral("b"), QStringLiteral("สอง"), QStringLiteral("222222"))),
+		      session.addPresident(
+			      president(QStringLiteral("b"), QStringLiteral("สอง"), QStringLiteral("222222"))),
 	      "roster for the dock tests");
 	FffHttpServer server(&session);
 	QString error;

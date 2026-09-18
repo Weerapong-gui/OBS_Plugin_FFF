@@ -18,7 +18,6 @@
 #include <cstdlib>
 #include <cstring>
 
-
 static void check(bool ok, const char *message)
 {
 	if (!ok)
@@ -162,26 +161,33 @@ int main(int argc, char **argv)
 	      "the title belongs to Show Status, not the bottom bar");
 	// One refusal per field that could reach the stream as something else.
 	const auto badHeading = [&](const char *body) {
-		return post(QByteArray("{\"piece\":\"heading\",\"box\":{\"x\":0,\"y\":0,\"width\":420,\"height\":100},") +
-				    body,
-			    QStringLiteral("template"));
+		return post(
+			QByteArray("{\"piece\":\"heading\",\"box\":{\"x\":0,\"y\":0,\"width\":420,\"height\":100},") +
+				body,
+			QStringLiteral("template"));
 	};
-	check(badHeading(R"("text":"a\tb","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+	check(badHeading(
+		      R"("text":"a\tb","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
 		      400,
 	      "a control character in the title is refused");
-	check(badHeading(R"("text":"a","fontFamily":"Bad\"Family","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+	check(badHeading(
+		      R"("text":"a","fontFamily":"Bad\"Family","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
 		      400,
 	      "a family name that could escape the declaration is refused");
-	check(badHeading(R"("text":"a","fontFamily":"","fontSize":4,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+	check(badHeading(
+		      R"("text":"a","fontFamily":"","fontSize":4,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
 		      400,
 	      "an unreadable size is refused");
-	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":950,"lineHeight":42,"align":"left","color":"#000000"})") ==
+	check(badHeading(
+		      R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":950,"lineHeight":42,"align":"left","color":"#000000"})") ==
 		      400,
 	      "a weight no face can have is refused");
-	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"middle","color":"#000000"})") ==
+	check(badHeading(
+		      R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"middle","color":"#000000"})") ==
 		      400,
 	      "an alignment that is not one of the three is refused");
-	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"black"})") ==
+	check(badHeading(
+		      R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"black"})") ==
 		      400,
 	      "a colour that is not #rrggbb is refused");
 	check(state(session).value("headingTemplate") == savedHeading, "refused titles change nothing");
@@ -201,7 +207,8 @@ int main(int argc, char **argv)
 	check(post(R"({"scoreboard":{"card":5001}})", QStringLiteral("timing")) == 400, "over-long duration rejected");
 	check(post(R"({"board":{"countTick":5}})", QStringLiteral("timing")) == 400, "too fast a tick rejected");
 	check(post(R"({"monitor":{"confirm":100}})", QStringLiteral("timing")) == 400, "too short a confirm rejected");
-	check(post(R"({"scoreboard":{"card":"slow"}})", QStringLiteral("timing")) == 400, "nonnumeric duration rejected");
+	check(post(R"({"scoreboard":{"card":"slow"}})", QStringLiteral("timing")) == 400,
+	      "nonnumeric duration rejected");
 	check(post(R"({"scoreboard":{"nosuchthing":100}})", QStringLiteral("timing")) == 400, "unknown key rejected");
 	check(post(R"({"nosuchgroup":{"card":100}})", QStringLiteral("timing")) == 400, "unknown group rejected");
 	check(post(R"({"scoreboard":600})", QStringLiteral("timing")) == 400, "group that is not an object rejected");
@@ -326,15 +333,12 @@ int main(int argc, char **argv)
 			    QStringLiteral("template"));
 	};
 	check(countPost(R"("fontFamily":"","fontSize":96)") == 200, "an empty family falls back to the page stack");
-	check(countPost(R"("fontFamily":"ไทยสบาย","fontSize":96)") == 200,
-	      "a Thai family name is accepted");
+	check(countPost(R"("fontFamily":"ไทยสบาย","fontSize":96)") == 200, "a Thai family name is accepted");
 	// Anything that could close out of a CSS font-family value is refused.
-	check(countPost(R"J("fontFamily":"Bad\";color:red","fontSize":96)J") == 400,
-	      "a quoted family is rejected");
+	check(countPost(R"J("fontFamily":"Bad\";color:red","fontSize":96)J") == 400, "a quoted family is rejected");
 	check(countPost(R"J("fontFamily":"Bad;color:red","fontSize":96)J") == 400,
 	      "a semicolon in a family is rejected");
-	check(countPost(R"J("fontFamily":"url(x)","fontSize":96)J") == 400,
-	      "brackets in a family are rejected");
+	check(countPost(R"J("fontFamily":"url(x)","fontSize":96)J") == 400, "brackets in a family are rejected");
 	check(countPost(QByteArray(R"("fontFamily":")") + QByteArray(121, 'a') + R"(","fontSize":96)") == 400,
 	      "an overlong family is rejected");
 	check(countPost(R"("fontFamily":"Menlo","fontSize":12)") == 400, "font size below the floor rejected");
@@ -345,8 +349,9 @@ int main(int argc, char **argv)
 		   QStringLiteral("template")) == 200,
 	      "a light weight saves");
 	for (const char *weight : {"50", "1000", "\"700\""}) {
-		check(post(QByteArray(R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
-				      R"("colors":{"red":"#e23c3c","green":"#21b04a"},"fontFamily":"","fontSize":96,"fontWeight":)") +
+		check(post(QByteArray(
+				   R"({"mode":"bottomBar","piece":"count","value":{"x":0,"y":0,"width":10,"height":10},)"
+				   R"("colors":{"red":"#e23c3c","green":"#21b04a"},"fontFamily":"","fontSize":96,"fontWeight":)") +
 				   weight + "})",
 			   QStringLiteral("template")) == 400,
 		      "a weight outside 100-900 is rejected");
@@ -454,9 +459,10 @@ int main(int argc, char **argv)
 	{
 		const QByteArray pngBytes = QByteArray::fromHex("89504e470d0a1a0a") + "status";
 		const auto postAsset = [&](const QString &id, const QString &kind, const QByteArray &bytes) {
-			QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/api/asset?presidentId=%2&kind=%3")
-							     .arg(server.boundPort())
-							     .arg(id, kind)));
+			QNetworkRequest request(
+				QUrl(QStringLiteral("http://127.0.0.1:%1/api/asset?presidentId=%2&kind=%3")
+					     .arg(server.boundPort())
+					     .arg(id, kind)));
 			request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("image/png"));
 			auto *reply = network.post(request, bytes);
 			QEventLoop loop;
@@ -481,7 +487,8 @@ int main(int argc, char **argv)
 			      entry().value(QStringLiteral("cardUrl")).toString(),
 		      "a status with no artwork falls back to the card");
 		check(postAsset(person.id, QStringLiteral("qualified"), pngBytes) == 200, "upload qualified PNG");
-		check(postAsset(person.id, QStringLiteral("nonsense"), pngBytes) == 400, "unknown status kind rejected");
+		check(postAsset(person.id, QStringLiteral("nonsense"), pngBytes) == 400,
+		      "unknown status kind rejected");
 		check(postAsset(QStringLiteral("gone"), QStringLiteral("qualified"), pngBytes) == 404,
 		      "upload for a missing president rejected");
 		check(postAsset(person.id, QStringLiteral("waiting"), QByteArray("not a png at all")) == 400,
@@ -498,8 +505,12 @@ int main(int argc, char **argv)
 		      "the status chooses the artwork");
 		FffSession restarted;
 		restarted.load();
-		const auto reopened =
-			QJsonDocument::fromJson(restarted.overlayStateJson()).object().value(QStringLiteral("presidents")).toArray().at(0).toObject();
+		const auto reopened = QJsonDocument::fromJson(restarted.overlayStateJson())
+					      .object()
+					      .value(QStringLiteral("presidents"))
+					      .toArray()
+					      .at(0)
+					      .toObject();
 		check(reopened.value(QStringLiteral("status")).toString() == QLatin1String("qualified") &&
 			      reopened.value(QStringLiteral("statusUrl")).toString() == qualifiedUrl,
 		      "status and artwork survive a restart");
