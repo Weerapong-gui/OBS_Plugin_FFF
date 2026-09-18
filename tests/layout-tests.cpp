@@ -702,4 +702,128 @@ int main(int argc, char **argv)
 	      "old session retains launch behavior with empty bottom bar");
 	check(!state(old).contains("timing"), "a session without timing keeps the default lengths");
 	qInfo("PASS: layout/layer APIs, legacy session, persistence, rounds, validation, resets, failed writes");
+
+	// A machine that has just installed the plugin gets the board the plugin
+	// ships with. Everything about that has to be true exactly once: it is
+	// never allowed to touch a session an operator already has.
+	QTemporaryDir bundleDir;
+	check(bundleDir.isValid(), "temporary module data");
+	const QString cardsSource = QDir(bundleDir.path()).filePath(QStringLiteral("default-session/cards"));
+	check(QDir().mkpath(cardsSource), "bundled cards directory");
+	const QByteArray seedPng =
+		QByteArray::fromHex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+				    "890000000d4944415478da63f8ffff3f0005fe02fea735c8500000000049454e44ae426082");
+	for (const char *name : {"card-aaa.png", "qualified-bbb.png", "cover-ccc.png"}) {
+		QFile artwork(QDir(cardsSource).filePath(QString::fromUtf8(name)));
+		check(artwork.open(QIODevice::WriteOnly), "bundled artwork");
+		artwork.write(seedPng);
+		artwork.close();
+	}
+	QFile bundledSession(QDir(bundleDir.path()).filePath(QStringLiteral("default-session/session.json")));
+	check(bundledSession.open(QIODevice::WriteOnly), "bundled session");
+	bundledSession.write(
+		R"({"version":5,"phase":"collecting","round":1,"displayMode":"scoreboard",)"
+		R"("layout":{"x":0.5,"y":0.5,"scale":1},"pieces":{},"layers":{},)"
+		R"("timing":{"scoreboard":{"card":777}},)"
+		R"("bottomBar":{"cover":"cover-ccc.png","pieces":{},"layers":{}},)"
+		R"("presidents":[{"id":"seed-one","name":"หนึ่ง","school":"ADT",)"
+		R"("card":"card-aaa.png","qualified":"qualified-bbb.png","status":"waiting"},)"
+		R"({"id":"seed-two","name":"สอง","school":"AI","card":"card-aaa.png","status":"waiting"}]})");
+	bundledSession.close();
+
+	QTemporaryDir freshDir;
+	check(freshDir.isValid(), "temporary fresh config");
+	fffTestConfigPath = freshDir.path();
+
+	// No bundle in sight is the behaviour this plugin always had.
+	fffTestDataPath.clear();
+	FffSession bare;
+	bare.load();
+	check(bare.presidents().isEmpty() && !QFile::exists(QDir(freshDir.path()).filePath("session.json")),
+	      "a build carrying no bundled session still starts empty");
+
+	fffTestDataPath = bundleDir.path();
+	FffSession seeded;
+	seeded.load();
+	check(seeded.presidents().size() == 2, "a fresh install takes the bundled roster");
+	check(seeded.presidents().at(0).school == QLatin1String("ADT") &&
+		      seeded.presidents().at(0).card == QLatin1String("card-aaa.png"),
+	      "with its schools and its artwork");
+	check(QFile::exists(QDir(freshDir.path()).filePath("cards/card-aaa.png")) &&
+		      QFile::exists(QDir(freshDir.path()).filePath("cards/cover-ccc.png")),
+	      "and the pictures it points at are copied into place");
+	check(state(seeded).value("timing").toObject().value("scoreboard").toObject().value("card").toDouble() == 777,
+	      "templates and lengths come with it");
+	// PINs belong to an event and to one machine, so the bundle carries none.
+	const QString firstPin = seeded.presidents().at(0).pin;
+	const QString secondPin = seeded.presidents().at(1).pin;
+	check(firstPin.size() == 6 && secondPin.size() == 6 && firstPin != secondPin,
+	      "every president is given a PIN of this machine's own");
+	check(seeded.monitorKey().isEmpty() && !seeded.monitorLanEnabled(),
+	      "and LAN access starts off, with no key inherited from anyone");
+	check(seeded.phase() == FffPhase::Collecting && seeded.round() == 1 && seeded.votedCount() == 0,
+	      "a seeded board starts blank on round one");
+
+	// Seeding happens once. Re-reading must find the machine's own session,
+	// PINs and all, not the bundle again.
+	FffSession reseeded;
+	reseeded.load();
+	check(reseeded.presidents().size() == 2 && reseeded.presidents().at(0).pin == firstPin,
+	      "the seeded session is saved, so the next launch keeps its PINs");
+
+	// An operator's own board is never touched, however old or small it is.
+	QTemporaryDir usedDir;
+	check(usedDir.isValid(), "temporary used config");
+	fffTestConfigPath = usedDir.path();
+	QFile ownSession(QDir(usedDir.path()).filePath(QStringLiteral("session.json")));
+	check(ownSession.open(QIODevice::WriteOnly), "existing session");
+	ownSession.write(R"({"version":5,"presidents":[],"phase":"collecting","round":9})");
+	ownSession.close();
+	FffSession untouched;
+	untouched.load();
+	check(untouched.presidents().isEmpty() && untouched.round() == 9,
+	      "a session of its own is never replaced by the bundled one");
+	check(!QFile::exists(QDir(usedDir.path()).filePath("cards/card-aaa.png")),
+	      "and no bundled artwork is copied over it");
+
+	// The bundle that actually ships, put through the real loader. A session
+	// the plugin would refuse is a release where every new install comes up
+	// blank, and nothing else in the build would notice.
+	if (QFile::exists(
+		    QDir(QStringLiteral(FFF_BUNDLED_DATA)).filePath(QStringLiteral("default-session/session.json")))) {
+		QTemporaryDir shippedDir;
+		check(shippedDir.isValid(), "temporary config for the shipped bundle");
+		fffTestConfigPath = shippedDir.path();
+		fffTestDataPath = QStringLiteral(FFF_BUNDLED_DATA);
+		FffSession shipped;
+		shipped.load();
+		check(!shipped.presidents().isEmpty(), "the bundled session loads and has a roster");
+		check(shipped.monitorKey().isEmpty() && !shipped.monitorLanEnabled(),
+		      "and carries no LAN key into a repository anyone can read");
+		check(shipped.phase() == FffPhase::Collecting && shipped.round() == 1 && shipped.votedCount() == 0,
+		      "and starts blank on round one");
+		for (const FffPresident &president : shipped.presidents()) {
+			check(president.pin.size() == 6, "every shipped president is given a PIN here");
+			check(!president.school.isEmpty(), "and keeps the school it belongs to");
+			// Artwork the session names but the bundle forgot would leave a
+			// hole on air that only shows up during a show.
+			for (const QString &kind :
+			     {QStringLiteral("card"), QStringLiteral("bottomBar"), QStringLiteral("logo"),
+			      QStringLiteral("logo2"), QStringLiteral("qualified"), QStringLiteral("unqualified"),
+			      QStringLiteral("waiting")}) {
+				const QString url = shipped.assetUrl(president, kind);
+				if (url.isEmpty())
+					continue;
+				check(QFile::exists(QDir(shippedDir.path())
+							    .filePath(QStringLiteral("cards/") +
+								      url.section(QLatin1Char('='), 1, 1)
+									      .section(QLatin1Char('&'), 0, 0))),
+				      "and every picture it names arrived with it");
+			}
+		}
+	}
+
+	fffTestDataPath.clear();
+	fffTestConfigPath = temp.path();
+	qInfo("PASS: a fresh install starts from the bundled session, an existing one is left alone");
 }

@@ -446,6 +446,50 @@ a central fixture logo and a transparent Cover containing only thin top rules.
 These graphics exist only in the test. Finished effects are settled and the
 compositor is given time to rasterize each frozen frame before capture.
 
+## The session a fresh install starts from
+
+`data/default-session/` ships with the plugin — `session.json` plus the artwork
+it points at — and `FffSession::seedFromBundle()` copies it into the config
+directory the first time the plugin runs on a machine that has no session of
+its own. `load()` calls it only when `session.json` does not exist, then opens
+and parses the copy through the ordinary path, so every existing validation and
+clamp still applies. A build with no bundle behaves exactly as before.
+
+What the bundle deliberately leaves out is the point of it. A session written
+by the plugin carries every president's PIN and the LAN monitor key, and this
+repository is public, so `monitorKey`, `monitorLanEnabled`, `port`, `votes` and
+every `pin` are dropped, and `phase`, `round` and each president's `status` are
+forced back to a blank board on round one. `load()` mints a fresh PIN for any
+president that arrives without one and saves once, which is what turns the
+seeded copy into a session of that machine's own. With no key, `load()` already
+forces `monitorLanEnabled` off, so LAN access starts closed.
+
+Artwork ships at the size that reaches the screen: anything over 1920x1080 is
+already served as a rendition, so the rendition travels under the original
+name. The receiving machine sees a file that needs no shrinking, and the
+picture on air is identical. For the current roster that is 10 MB rather than
+82 MB, out of a `cards/` directory holding 192 MB — replacing a president's
+artwork leaves the old file behind, so most of what is on disk is not
+referenced at all and never ships.
+
+Rebuild the bundle from a working session with:
+
+```sh
+build-aux/make-default-session [config-dir]   # defaults to this machine's
+cmake --preset macos                          # data/ is globbed at configure time
+```
+
+It refuses to write a bundle whose secrets survived sanitising, prints what it
+dropped, and fails if the session names a PNG that is not on disk.
+
+`layout-tests` covers seeding end to end against a temporary module data
+directory (`fffTestDataPath` in `tests/obs-stubs.*`, the mirror of
+`fffTestConfigPath`): a fresh install takes the roster, artwork, templates and
+timing; PINs are minted, six digits, and differ; the LAN key is not inherited;
+the board starts blank on round one; the seeded session is saved so the next
+launch keeps its PINs; a session that already exists is never replaced and no
+artwork is copied over it; and a build carrying no bundle still starts empty.
+
 ## Monitor LAN access
 
 `monitor-access-tests` covers the pure rules in `src/fff-monitor-access.*`: key
