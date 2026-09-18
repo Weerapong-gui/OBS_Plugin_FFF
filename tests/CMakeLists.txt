@@ -24,6 +24,9 @@ add_executable(
 )
 target_include_directories(layout-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
 target_link_libraries(layout-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
+# The session the plugin ships with is checked against the real loader, so a
+# bundle the plugin would refuse cannot reach a release.
+target_compile_definitions(layout-tests PRIVATE FFF_BUNDLED_DATA="${CMAKE_CURRENT_SOURCE_DIR}/../data")
 add_test(NAME layout-tests COMMAND layout-tests)
 
 add_executable(monitor-access-tests monitor-access-tests.cpp ../src/fff-monitor-access.cpp)

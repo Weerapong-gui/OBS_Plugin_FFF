@@ -772,6 +772,46 @@ QString FffSession::configDir() const
 	return dir;
 }
 
+// A machine that has just installed the plugin has no board to show and no way
+// to guess what one should look like, so the roster, artwork, placements and
+// templates it ships with become its first session. Only ever when there is no
+// session of its own: an operator's own board is never touched, and a build
+// carrying no bundle behaves exactly as it always did.
+void FffSession::seedFromBundle() const
+{
+	char *found = obs_module_file("default-session/session.json");
+	const QString bundled = QString::fromUtf8(found ? found : "");
+	bfree(found);
+	if (bundled.isEmpty() || !QFile::exists(bundled))
+		return;
+
+	// Artwork first. A session that names a PNG which never arrived is worse
+	// than no session at all, so the file that makes the board live is
+	// written only once every picture it points at is in place.
+	char *foundCards = obs_module_file("default-session/cards");
+	const QString bundledCards = QString::fromUtf8(foundCards ? foundCards : "");
+	bfree(foundCards);
+	const QString target = cardsDir();
+	int copied = 0;
+	if (!bundledCards.isEmpty()) {
+		const QDir source(bundledCards);
+		for (const QString &name : source.entryList({QStringLiteral("*.png")}, QDir::Files)) {
+			const QString destination = QDir(target).filePath(name);
+			if (QFile::exists(destination))
+				continue;
+			if (QFile::copy(source.filePath(name), destination))
+				++copied;
+		}
+	}
+
+	const QString session = QDir(configDir()).filePath(QStringLiteral("session.json"));
+	if (!QFile::copy(bundled, session)) {
+		obs_log(LOG_WARNING, "could not write the bundled session to %s", session.toUtf8().constData());
+		return;
+	}
+	obs_log(LOG_INFO, "seeded a new session from the bundled default (%d artwork files)", copied);
+}
+
 QString FffSession::cardsDir() const
 {
 	const QString dir = QDir(configDir()).filePath(QStringLiteral("cards"));
@@ -966,6 +1006,9 @@ bool FffSession::setLogoRound(int round)
 void FffSession::load()
 {
 	const QString path = QDir(configDir()).filePath(QStringLiteral("session.json"));
+	if (!QFile::exists(path))
+		seedFromBundle();
+
 	QFile file(path);
 	if (!file.open(QIODevice::ReadOnly))
 		return;
@@ -1119,6 +1162,20 @@ void FffSession::load()
 		if (vote != FffVote::None && indexOf(it.key()) >= 0)
 			m_votes.insert(it.key(), vote);
 	}
+
+	// A PIN belongs to an event and to one machine, so the bundled session
+	// carries none and the roster that arrives from it is given a fresh set
+	// here. Saving turns that seeded copy into a session of this machine's
+	// own; a roster that already had its PINs writes nothing.
+	bool minted = false;
+	for (FffPresident &president : m_presidents) {
+		if (!president.pin.isEmpty())
+			continue;
+		president.pin = uniquePin();
+		minted = true;
+	}
+	if (minted && !save())
+		obs_log(LOG_WARNING, "could not save the PINs minted for a seeded roster");
 
 	emit changed();
 }

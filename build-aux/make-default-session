@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Build the session a fresh install starts from, out of a working one.
+
+A machine that has just installed the plugin has no board to show and no way
+to guess what one should look like. This takes a session an operator has
+already set up — roster, artwork, placements, templates, timing — and writes
+it into data/default-session/, which ships with the plugin and is copied into
+place the first time it runs.
+
+What it deliberately leaves behind is as important as what it keeps. A session
+written by the plugin carries every president's PIN and the LAN monitor key,
+and this repository is public. Those are minted per machine, not content, so
+they are dropped here and made fresh on the machine that receives them. The
+live round is dropped too: round 281 with votes in it is the state of a show,
+not a starting point.
+
+Artwork is taken at the size that actually reaches the screen. Anything larger
+than 1920x1080 is already served as a rendition, so the rendition is what
+ships under the original name — the picture on air is identical and the
+receiving machine has no shrinking left to do. For this roster that is the
+difference between 82 MB and 10 MB.
+
+    build-aux/make-default-session [config-dir]
+
+Defaults to the OBS plugin config directory on this machine.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import sys
+
+# Everything a session carries that belongs to one machine or one event.
+DROPPED_ROOT = ("monitorKey", "monitorLanEnabled", "port", "votes")
+DROPPED_PRESIDENT = ("pin",)
+# Forced rather than dropped: a starting point is a blank board on round one.
+FORCED_ROOT = {"phase": "collecting", "round": 1}
+FORCED_PRESIDENT = {"status": "waiting"}
+
+ASSET_KINDS = ("card", "bottomBar", "logo", "logo2", "qualified", "unqualified", "waiting")
+
+DEFAULT_CONFIG = os.path.expanduser(
+    "~/Library/Application Support/obs-studio/plugin_config/fff-tools"
+)
+
+
+def referenced_assets(session):
+    """Every file name the session still points at.
+
+    Replacing a president's artwork leaves the old file in cards/ — nothing in
+    the plugin ever deletes one — so the directory holds far more than the
+    session uses. Only what is pointed at ships.
+    """
+    names = set()
+    for president in session.get("presidents", []):
+        for kind in ASSET_KINDS:
+            name = president.get(kind)
+            if name:
+                names.add(name)
+    cover = session.get("bottomBar", {}).get("cover")
+    if cover:
+        names.add(cover)
+    return names
+
+
+def sanitise(session):
+    clean = {key: value for key, value in session.items() if key not in DROPPED_ROOT}
+    clean.update(FORCED_ROOT)
+    presidents = []
+    for president in session.get("presidents", []):
+        entry = {key: value for key, value in president.items() if key not in DROPPED_PRESIDENT}
+        entry.update(FORCED_PRESIDENT)
+        presidents.append(entry)
+    clean["presidents"] = presidents
+    return clean
+
+
+def assert_clean(clean):
+    """The last line of defence before this reaches a public repository."""
+    for key in DROPPED_ROOT:
+        assert key not in clean, f"{key} survived sanitising"
+    for president in clean["presidents"]:
+        for key in DROPPED_PRESIDENT:
+            assert key not in president, f"{key} survived sanitising"
+    assert clean["phase"] == "collecting" and clean["round"] == 1
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config_dir", nargs="?", default=DEFAULT_CONFIG,
+                        help="the plugin config directory to take the session from")
+    parser.add_argument("--out", default=None,
+                        help="where to write the bundle (default: data/default-session)")
+    args = parser.parse_args()
+
+    config_dir = args.config_dir
+    source_session = os.path.join(config_dir, "session.json")
+    cards = os.path.join(config_dir, "cards")
+    renditions = os.path.join(cards, "renditions")
+    if not os.path.exists(source_session):
+        sys.exit(f"no session at {source_session}")
+
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out = args.out or os.path.join(repo, "data", "default-session")
+    out_cards = os.path.join(out, "cards")
+
+    with open(source_session, encoding="utf-8") as handle:
+        session = json.load(handle)
+
+    clean = sanitise(session)
+    assert_clean(clean)
+
+    wanted = referenced_assets(clean)
+    missing = [name for name in wanted if not os.path.exists(os.path.join(cards, name))]
+    if missing:
+        sys.exit(f"session points at {len(missing)} file(s) that are not on disk: {missing[:3]}")
+
+    # Written from scratch: a name dropped from the roster since the last run
+    # must not linger in the bundle.
+    if os.path.exists(out):
+        shutil.rmtree(out)
+    os.makedirs(out_cards)
+
+    shipped = 0
+    total = 0
+    for name in sorted(wanted):
+        rendition = os.path.join(renditions, name)
+        source = rendition if os.path.exists(rendition) else os.path.join(cards, name)
+        shutil.copyfile(source, os.path.join(out_cards, name))
+        total += os.path.getsize(source)
+        shipped += 1
+
+    with open(os.path.join(out, "session.json"), "w", encoding="utf-8") as handle:
+        json.dump(clean, handle, ensure_ascii=False, indent=1, sort_keys=True)
+        handle.write("\n")
+
+    print(f"from      {config_dir}")
+    print(f"wrote     {out}")
+    print(f"presidents {len(clean['presidents'])}")
+    print(f"artwork   {shipped} files, {total / 1048576:.1f} MB")
+    print("dropped   " + ", ".join(DROPPED_ROOT) + ", presidents[].pin")
+    print("forced    " + ", ".join(f"{k}={v!r}" for k, v in FORCED_ROOT.items())
+          + ", presidents[].status='waiting'")
+
+
+if __name__ == "__main__":
+    main()

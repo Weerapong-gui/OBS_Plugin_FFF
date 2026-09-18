@@ -187,6 +187,9 @@ signals:
 
 private:
 	QString configDir() const;
+	// Copies the session this plugin ships with into place, once, on a machine
+	// that has none of its own.
+	void seedFromBundle() const;
 	QJsonObject bottomBarJson() const;
 	FffLayout m_bottomLayout;
 	QJsonObject m_bottomLogoTemplate;
