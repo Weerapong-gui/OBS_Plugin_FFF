@@ -5,6 +5,8 @@ GPL-2.0-or-later
 */
 
 #include "fff-http-server.h"
+#include "fff-asset-rendition.h"
+#include "fff-monitor-access.h"
 #include "fff-session.h"
 
 #include <obs-module.h>
@@ -19,6 +21,8 @@ GPL-2.0-or-later
 #include <QNetworkInterface>
 #include <QPointer>
 #include <QRandomGenerator>
+#include <QSet>
+#include <QSignalBlocker>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -30,6 +34,10 @@ GPL-2.0-or-later
 namespace {
 
 constexpr int kMaxRequestBytes = 64 * 1024;
+// Artwork uploads are the only requests that outgrow the normal cap. Only this
+// machine and a LAN monitor holding the current key get the larger one, so a
+// phone on the venue's network still cannot make the plugin buffer megabytes.
+constexpr int kMaxUploadBytes = 8 * 1024 * 1024;
 constexpr int kHeartbeatMs = 15000;
 constexpr int kBadPinDelayMs = 1000;
 
@@ -38,6 +46,10 @@ QByteArray reasonPhrase(int code)
 	switch (code) {
 	case 200:
 		return "OK";
+	case 204:
+		return "No Content";
+	case 303:
+		return "See Other";
 	case 400:
 		return "Bad Request";
 	case 401:
@@ -55,6 +67,46 @@ QByteArray reasonPhrase(int code)
 	}
 }
 
+// What each monitor route answered before LAN access existed, kept so a
+// refusal still names what was refused.
+QByteArray deniedText(const QString &path)
+{
+	static const QHash<QString, QByteArray> texts = {
+		{QStringLiteral("/api/events/overlay"), QByteArrayLiteral("overlay is local only")},
+		{QStringLiteral("/api/template"), QByteArrayLiteral("template is local only")},
+		{QStringLiteral("/api/timing"), QByteArrayLiteral("timing is local only")},
+		{QStringLiteral("/api/status"), QByteArrayLiteral("status is local only")},
+		{QStringLiteral("/api/asset"), QByteArrayLiteral("uploads are local only")},
+		{QStringLiteral("/api/operator/vote"), QByteArrayLiteral("operator controls are local only")},
+		{QStringLiteral("/api/layout"), QByteArrayLiteral("layout is local only")},
+		{QStringLiteral("/api/layer"), QByteArrayLiteral("layer controls are local only")},
+	};
+	return texts.value(path, QByteArrayLiteral("monitor access required"));
+}
+
+// A key link clicked inside another website arrives cross-site, so the browser
+// holds back the SameSite=Strict cookie the redirect just set. A reload started
+// from this page is same-site and carries it; retry at most once every 10 s.
+QByteArray monitorDeniedPage()
+{
+	return QStringLiteral("<!doctype html><html lang=\"th\"><head><meta charset=\"utf-8\">"
+			      "<title>FFF Monitor</title></head>"
+			      "<body style=\"font-family:sans-serif;background:#0e1116;color:#f4f6f8;padding:32px\">"
+			      "<h1>เปิดจอมอนิเตอร์ไม่ได้</h1>"
+			      "<p>ต้องเปิดจากลิงก์ใน dock (แท็บ ตั้งค่า → Monitor LAN) และ operator ต้องเปิดสิทธิ์ไว้</p>"
+			      "<script>"
+			      "try {"
+			      "const last = Number(sessionStorage.getItem(\"fffMonitorRetry\") || 0);"
+			      "if (Date.now() - last > 10000) {"
+			      "sessionStorage.setItem(\"fffMonitorRetry\", String(Date.now()));"
+			      "location.reload();"
+			      "}"
+			      "} catch (err) {}"
+			      "</script>"
+			      "</body></html>")
+		.toUtf8();
+}
+
 QString randomToken()
 {
 	QRandomGenerator *generator = QRandomGenerator::system();
@@ -67,18 +119,38 @@ QString randomToken()
 
 FffHttpServer::FffHttpServer(FffSession *session, QObject *parent) : QObject(parent), m_session(session)
 {
+	m_renditionPool.setMaxThreadCount(1);
 	m_heartbeat = new QTimer(this);
 	m_heartbeat->setInterval(kHeartbeatMs);
 	connect(m_heartbeat, &QTimer::timeout, this, &FffHttpServer::sendHeartbeat);
 
 	connect(m_session, &FffSession::changed, this, [this]() {
-		m_cardCache.clear();
+		// Keep artwork that is still in play: a vote must not throw away a
+		// roster's worth of PNGs the next reveal is about to ask for again.
+		const QStringList paths = m_session->assetPaths();
+		const QSet<QString> live(paths.cbegin(), paths.cend());
+		for (auto it = m_cardCache.begin(); it != m_cardCache.end();) {
+			if (live.contains(it.key()))
+				++it;
+			else
+				it = m_cardCache.erase(it);
+		}
+		prepareRenditions();
 		pushState();
 	});
+
+	connect(m_session, &FffSession::monitorAccessChanged, this, &FffHttpServer::dropRemoteMonitors);
+	prepareRenditions();
 }
 
 FffHttpServer::~FffHttpServer()
 {
+	// Sibling widgets are children of the same dock and may already be gone by
+	// the time Qt gets here, so stop()'s clientsChanged must not reach them.
+	const QSignalBlocker blocker(this);
+	// A job still running would report back into a destroyed server.
+	m_renditionPool.clear();
+	m_renditionPool.waitForDone();
 	stop();
 }
 
@@ -119,6 +191,7 @@ void FffHttpServer::stop()
 	m_tokens.clear();
 	m_fileCache.clear();
 	m_cardCache.clear();
+	m_waitingRenditions.clear();
 
 	if (m_server) {
 		m_server->close();
@@ -148,10 +221,37 @@ int FffHttpServer::overlayClientCount() const
 {
 	int count = 0;
 	for (const Conn &conn : m_conns) {
-		if (conn.sse && conn.overlay)
+		if (conn.sse && conn.overlay && !conn.remoteMonitor)
 			++count;
 	}
 	return count;
+}
+
+int FffHttpServer::remoteMonitorClientCount() const
+{
+	int count = 0;
+	for (const Conn &conn : m_conns) {
+		if (conn.sse && conn.remoteMonitor)
+			++count;
+	}
+	return count;
+}
+
+void FffHttpServer::dropRemoteMonitors()
+{
+	QList<QTcpSocket *> sockets;
+	for (auto it = m_conns.cbegin(); it != m_conns.cend(); ++it) {
+		if (it.value().remoteMonitor)
+			sockets.append(it.key());
+	}
+	for (QTcpSocket *socket : sockets) {
+		m_conns.remove(socket);
+		socket->disconnect(this);
+		socket->close();
+		socket->deleteLater();
+	}
+	if (!sockets.isEmpty())
+		emit clientsChanged();
 }
 
 QStringList FffHttpServer::lanAddresses()
@@ -202,35 +302,69 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		return;
 
 	Conn &conn = it.value();
-	if (conn.sse) {
+	if (conn.sse || conn.closing) {
 		socket->readAll();
 		return;
 	}
 
 	conn.buffer.append(socket->readAll());
-	if (conn.buffer.size() > kMaxRequestBytes) {
-		send(socket, 413, "text/plain; charset=utf-8", "too large");
+	const int headerEnd = conn.buffer.indexOf("\r\n\r\n");
+	if (headerEnd < 0 || headerEnd > kMaxRequestBytes) {
+		// Nothing has earned the upload allowance before its headers are read.
+		if (conn.buffer.size() > kMaxRequestBytes)
+			send(socket, 413, "text/plain; charset=utf-8", "too large");
 		return;
 	}
 
-	const int headerEnd = conn.buffer.indexOf("\r\n\r\n");
-	if (headerEnd < 0)
-		return;
-
-	const QByteArray head = conn.buffer.left(headerEnd);
-	const QList<QByteArray> lines = head.split('\n');
-	if (lines.isEmpty()) {
+	const QList<QByteArray> lines = conn.buffer.left(headerEnd).split('\n');
+	const QList<QByteArray> parts = lines.at(0).trimmed().split(' ');
+	if (parts.size() < 2) {
 		send(socket, 400, "text/plain; charset=utf-8", "bad request");
 		return;
 	}
 
 	int contentLength = 0;
+	QByteArray cookieHeader;
 	for (int i = 1; i < lines.size(); ++i) {
 		const QByteArray line = lines.at(i).trimmed();
-		if (line.toLower().startsWith("content-length:"))
+		const QByteArray lower = line.toLower();
+		if (lower.startsWith("content-length:"))
 			contentLength = line.mid(line.indexOf(':') + 1).trimmed().toInt();
+		else if (lower.startsWith("cookie:"))
+			cookieHeader = line.mid(line.indexOf(':') + 1).trimmed();
 	}
-	if (contentLength < 0 || contentLength > kMaxRequestBytes) {
+
+	const QByteArray method = parts.at(0);
+	const QUrl url = QUrl::fromEncoded(parts.at(1));
+	const QUrlQuery query(url);
+	const QString path = url.path();
+
+	FffMonitorAccess::Request access;
+	access.loopback = socket->peerAddress().isLoopback();
+	access.endpoint = FffMonitorAccess::classify(method, path);
+	access.enabled = m_session->monitorLanEnabled();
+	access.storedKey = m_session->monitorKey();
+	access.queryKey = query.queryItemValue(QStringLiteral("key"));
+	access.cookieKey = FffMonitorAccess::cookieValue(cookieHeader);
+
+	switch (FffMonitorAccess::decide(access)) {
+	case FffMonitorAccess::Decision::Deny:
+		sendDenied(socket, path, FffMonitorAccess::presentedWrongKey(access));
+		return;
+	case FffMonitorAccess::Decision::Redirect:
+		// Trade the key in the address bar for a cookie the page's own requests
+		// carry, and leave a clean URL behind.
+		send(socket, 303, "text/plain; charset=utf-8", QByteArray(), "no-store",
+		     "Location: /monitor\r\nSet-Cookie: " + FffMonitorAccess::setCookieHeader(access.storedKey) +
+			     "\r\n");
+		return;
+	case FffMonitorAccess::Decision::Allow:
+		break;
+	}
+
+	const bool uploader = access.loopback || access.endpoint == FffMonitorAccess::Endpoint::MonitorApi;
+	const int limit = uploader ? kMaxUploadBytes : kMaxRequestBytes;
+	if (contentLength < 0 || contentLength > limit) {
 		send(socket, 400, "text/plain; charset=utf-8", "bad request");
 		return;
 	}
@@ -238,17 +372,15 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		return;
 
 	const QByteArray body = conn.buffer.mid(headerEnd + 4, contentLength);
-	const QList<QByteArray> parts = lines.at(0).trimmed().split(' ');
-	if (parts.size() < 2) {
-		send(socket, 400, "text/plain; charset=utf-8", "bad request");
-		return;
-	}
-
-	const QUrl url = QUrl::fromEncoded(parts.at(1));
-	const QString token = QUrlQuery(url).queryItemValue(QStringLiteral("token"));
-	route(socket, parts.at(0), url.path(), token, body);
+	m_query = query;
+	m_remoteRequest = !access.loopback && access.endpoint == FffMonitorAccess::Endpoint::MonitorApi;
+	route(socket, method, path, query.queryItemValue(QStringLiteral("token")), body);
 }
 
+// Every route below that is not meant for the whole LAN must be listed in
+// FffMonitorAccess::classify() (src/fff-monitor-access.cpp) as MonitorApi or
+// LocalOnly — its default is Endpoint::Public, so a route left out of that
+// switch is open to anyone on the LAN, key or no key.
 void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QString &path, const QString &token,
 			  const QByteArray &body)
 {
@@ -262,16 +394,17 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/monitor")) {
-			// Shows the flags before they go on air, same as the overlay feed.
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "monitor is local only");
-				return;
-			}
+			// Shows the flags before they go on air. readFrom() only lets this
+			// machine or a LAN monitor holding the current key get this far.
 			sendWebFile(socket, QStringLiteral("monitor.html"), "text/html; charset=utf-8");
 			return;
 		}
 		if (path == QLatin1String("/app.css")) {
 			sendWebFile(socket, QStringLiteral("app.css"), "text/css; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/timing.js")) {
+			sendWebFile(socket, QStringLiteral("timing.js"), "application/javascript; charset=utf-8");
 			return;
 		}
 		if (path == QLatin1String("/board.js")) {
@@ -283,14 +416,23 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 				    "application/javascript; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/view-zoom.js")) {
+			sendWebFile(socket, QStringLiteral("view-zoom.js"), "application/javascript; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/monitor-ui.js")) {
+			sendWebFile(socket, QStringLiteral("monitor-ui.js"), "application/javascript; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/api/monitor/access")) {
+			// readFrom() refused anyone without access, so getting here is the answer.
+			send(socket, 204, "text/plain; charset=utf-8", QByteArray());
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
-			// The overlay sees every flag before the reveal, so it is
-			// only ever served to OBS on this machine.
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "overlay is local only");
-				return;
-			}
-			startSse(socket, QString(), true);
+			// Every flag before the reveal: this machine, or a LAN monitor
+			// holding the current key (see readFrom()).
+			startSse(socket, QString(), true, m_remoteRequest);
 			return;
 		}
 		if (path == QLatin1String("/api/events")) {
@@ -305,7 +447,9 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendCard(socket, QString(), QStringLiteral("cover"));
 			return;
 		}
-		for (const QString &kind : {QStringLiteral("bottomBar"), QStringLiteral("logo")}) {
+		for (const QString &kind :
+		     {QStringLiteral("bottomBar"), QStringLiteral("logo"), QStringLiteral("logo2"),
+		      QStringLiteral("qualified"), QStringLiteral("unqualified"), QStringLiteral("waiting")}) {
 			const QString prefix = QStringLiteral("/api/") + kind + QStringLiteral("/");
 			if (path.startsWith(prefix)) {
 				sendCard(socket, path.mid(prefix.size()), kind);
@@ -318,10 +462,6 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		}
 	} else if (method == "POST") {
 		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo")) {
-			if (!socket->peerAddress().isLoopback()) {
-				sendJson(socket, 403, "{\"error\":\"local only\"}");
-				return;
-			}
 			const auto request = QJsonDocument::fromJson(body).object();
 			const QString value = request.value(path == QLatin1String("/api/display")
 								    ? QStringLiteral("mode")
@@ -339,21 +479,63 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			return;
 		}
 		if (path == QLatin1String("/api/template")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "template is local only");
-				return;
-			}
 			auto value = QJsonDocument::fromJson(body).object();
 			const QString mode = value.take(QStringLiteral("mode")).toString(QStringLiteral("scoreboard"));
+			const QString piece = value.take(QStringLiteral("piece")).toString(QStringLiteral("card"));
 			if (!FffSession::validMode(mode)) {
 				sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 				return;
 			}
-			if (!FffSession::validCardTemplate(value)) {
+			// The logo and the flag counters are Bottom Bar furniture and
+			// the title is Show Status furniture: each board has nothing for
+			// the other's pieces to describe.
+			const bool bottom = mode == QLatin1String("bottomBar");
+			const bool wrongBoard =
+				piece == QLatin1String("heading") ? bottom : piece != QLatin1String("card") && !bottom;
+			if (wrongBoard) {
+				sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+				return;
+			}
+			if (piece == QLatin1String("heading")) {
+				if (!FffSession::validHeadingTemplate(value)) {
+					sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+					return;
+				}
+				const bool saved = m_session->setHeadingTemplate(value);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			if (piece == QLatin1String("card")) {
+				if (!FffSession::validCardTemplate(value)) {
+					sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+					return;
+				}
+				const bool saved = m_session->setCardTemplate(value, mode);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			if (piece != QLatin1String("logo") && piece != QLatin1String("count")) {
+				sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+				return;
+			}
+			if (!(piece == QLatin1String("logo") ? FffSession::validLogoTemplate(value)
+							     : FffSession::validCountTemplate(value))) {
 				sendJson(socket, 400, "{\"error\":\"invalid template\"}");
 				return;
 			}
-			const bool saved = m_session->setCardTemplate(value, mode);
+			const bool saved = m_session->setBottomTemplate(piece, value);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		if (path == QLatin1String("/api/timing")) {
+			const auto value = QJsonDocument::fromJson(body).object();
+			if (!FffSession::validTiming(value)) {
+				sendJson(socket, 400, "{\"error\":\"invalid timing\"}");
+				return;
+			}
+			const bool saved = m_session->setTiming(value);
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
@@ -365,27 +547,65 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			handleVote(socket, body);
 			return;
 		}
-		if (path == QLatin1String("/api/operator/vote")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "operator controls are local only");
+		if (path == QLatin1String("/api/status")) {
+			const auto request = QJsonDocument::fromJson(body).object();
+			const QString id = request.value(QStringLiteral("presidentId")).toString();
+			const QString status = request.value(QStringLiteral("status")).toString();
+			if (!FffSession::validStatusName(status)) {
+				sendJson(socket, 400, "{\"error\":\"invalid status\"}");
 				return;
 			}
+			if (!m_session->presidentById(id)) {
+				sendJson(socket, 404, "{\"error\":\"president is gone\"}");
+				return;
+			}
+			const bool saved = m_session->setStatus(id, FffSession::statusFromName(status));
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		// Raw PNG bytes rather than multipart: one artwork per request, so there is
+		// nothing a form encoding would add but a parser to get wrong. An empty body
+		// clears the artwork for that status.
+		if (path == QLatin1String("/api/asset")) {
+			const QString id = m_query.queryItemValue(QStringLiteral("presidentId"));
+			const QString kind = m_query.queryItemValue(QStringLiteral("kind"));
+			if (!FffSession::validStatusName(kind)) {
+				sendJson(socket, 400, "{\"error\":\"invalid kind\"}");
+				return;
+			}
+			const FffPresident *president = m_session->presidentById(id);
+			if (!president) {
+				sendJson(socket, 404, "{\"error\":\"president is gone\"}");
+				return;
+			}
+			QString stored;
+			if (!body.isEmpty()) {
+				stored = m_session->storeAsset(body, kind);
+				if (stored.isEmpty()) {
+					sendJson(socket, 400, "{\"error\":\"not a PNG\"}");
+					return;
+				}
+			}
+			FffPresident updated = *president;
+			if (kind == QLatin1String("qualified"))
+				updated.qualified = stored;
+			else if (kind == QLatin1String("unqualified"))
+				updated.unqualified = stored;
+			else
+				updated.waiting = stored;
+			const bool saved = m_session->updatePresident(updated);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		if (path == QLatin1String("/api/operator/vote")) {
 			handleOperatorVote(socket, body);
 			return;
 		}
 		if (path == QLatin1String("/api/layout")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "layout is local only");
-				return;
-			}
 			handleLayout(socket, body);
 			return;
 		}
 		if (path == QLatin1String("/api/layer")) {
-			if (!socket->peerAddress().isLoopback()) {
-				send(socket, 403, "text/plain; charset=utf-8", "layer controls are local only");
-				return;
-			}
 			handleLayer(socket, body);
 			return;
 		}
@@ -464,7 +684,6 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 		sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 		return;
 	}
-	const QString special = mode == QLatin1String("bottomBar") ? QStringLiteral("logo") : QStringLiteral("heading");
 	if (request.contains(QStringLiteral("target"))) {
 		const QString target = request.value(QStringLiteral("target")).toString();
 		const bool reset = request.value(QStringLiteral("reset")).toBool();
@@ -473,8 +692,7 @@ void FffHttpServer::handleLayout(QTcpSocket *socket, const QByteArray &body)
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
-		if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
-		    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+		if (!m_session->validPieceTarget(mode, target)) {
 			sendJson(socket, 404, "{\"error\":\"unknown layout target\"}");
 			return;
 		}
@@ -540,11 +758,9 @@ void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
 		sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 		return;
 	}
-	const QString special = mode == QLatin1String("bottomBar") ? QStringLiteral("logo") : QStringLiteral("heading");
 	const QString target = request.value(QStringLiteral("target")).toString();
 	const QString action = request.value(QStringLiteral("action")).toString();
-	if (target != special && !(mode == QLatin1String("bottomBar") && target == QLatin1String("cover")) &&
-	    (!target.startsWith(QLatin1String("card:")) || !m_session->presidentById(target.mid(5)))) {
+	if (!m_session->validPieceTarget(mode, target)) {
 		sendJson(socket, 404, "{\"error\":\"unknown layer target\"}");
 		return;
 	}
@@ -557,7 +773,7 @@ void FffHttpServer::handleLayer(QTcpSocket *socket, const QByteArray &body)
 	sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 }
 
-void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay)
+void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool overlay, bool remoteMonitor)
 {
 	auto it = m_conns.find(socket);
 	if (it == m_conns.end())
@@ -566,6 +782,7 @@ void FffHttpServer::startSse(QTcpSocket *socket, const QString &token, bool over
 	Conn &conn = it.value();
 	conn.sse = true;
 	conn.overlay = overlay;
+	conn.remoteMonitor = remoteMonitor;
 	conn.token = token;
 	conn.buffer.clear();
 
@@ -620,18 +837,51 @@ void FffHttpServer::sendHeartbeat()
 }
 
 void FffHttpServer::send(QTcpSocket *socket, int code, const QByteArray &contentType, const QByteArray &body,
-			 const QByteArray &cacheControl)
+			 const QByteArray &cacheControl, const QByteArray &extraHeaders)
 {
+	// Every reply closes the connection, so nothing that arrives after it may
+	// start a second one.
+	auto it = m_conns.find(socket);
+	if (it != m_conns.end())
+		it.value().closing = true;
+
 	QByteArray response = "HTTP/1.1 " + QByteArray::number(code) + " " + reasonPhrase(code) + "\r\n";
 	response += "Content-Type: " + contentType + "\r\n";
 	response += "Content-Length: " + QByteArray::number(body.size()) + "\r\n";
 	response += "Cache-Control: " + cacheControl + "\r\n";
+	response += extraHeaders;
 	response += "Connection: close\r\n\r\n";
 	response += body;
 
 	socket->write(response);
 	socket->flush();
 	socket->disconnectFromHost();
+}
+
+void FffHttpServer::sendDenied(QTcpSocket *socket, const QString &path, bool delay)
+{
+	auto it = m_conns.find(socket);
+	if (it != m_conns.end())
+		it.value().closing = true;
+
+	const auto reply = [this, path](QTcpSocket *target) {
+		if (path == QLatin1String("/monitor"))
+			send(target, 403, "text/html; charset=utf-8", monitorDeniedPage());
+		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
+			sendJson(target, 403, "{\"error\":\"local only\"}");
+		else
+			send(target, 403, "text/plain; charset=utf-8", deniedText(path));
+	};
+	if (!delay) {
+		reply(socket);
+		return;
+	}
+	// Same brake as a wrong PIN: guessing a key costs a second a try.
+	QPointer<QTcpSocket> guard(socket);
+	QTimer::singleShot(kBadPinDelayMs, this, [this, guard, reply]() {
+		if (guard && m_conns.contains(guard))
+			reply(guard);
+	});
 }
 
 void FffHttpServer::sendJson(QTcpSocket *socket, int code, const QByteArray &json)
@@ -663,10 +913,88 @@ void FffHttpServer::sendCard(QTcpSocket *socket, const QString &presidentId, con
 	const QString path = kind == QLatin1String("cover")
 				     ? m_session->coverPath()
 				     : (president ? m_session->assetPath(*president, kind) : QString());
-	QFile file(path);
-	if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+	if (path.isEmpty()) {
 		send(socket, 404, "text/plain; charset=utf-8", "no asset");
 		return;
 	}
-	send(socket, 200, "image/png", file.readAll());
+
+	// Artwork still being shrunk is answered when its rendition lands, so a
+	// browser never caches the full-size bytes under this URL.
+	ensureRendition(path);
+	if (m_renditionJobs.contains(path)) {
+		auto it = m_conns.find(socket);
+		if (it != m_conns.end())
+			it.value().closing = true;
+		m_waitingRenditions[path].append(QPointer<QTcpSocket>(socket));
+		return;
+	}
+
+	const std::optional<QByteArray> bytes = cardBytes(path);
+	if (!bytes) {
+		send(socket, 404, "text/plain; charset=utf-8", "no asset");
+		return;
+	}
+	// Every import lands under a fresh UUID file name and the URL carries it as
+	// ?v=, so a given asset URL can never change content.
+	send(socket, 200, "image/png", *bytes, "public, max-age=31536000, immutable");
+}
+
+std::optional<QByteArray> FffHttpServer::cardBytes(const QString &path)
+{
+	auto cached = m_cardCache.constFind(path);
+	if (cached != m_cardCache.constEnd())
+		return cached.value();
+
+	const QString rendition = FffAssetRendition::renditionPath(path);
+	QFile file(QFileInfo::exists(rendition) ? rendition : path);
+	if (!file.open(QIODevice::ReadOnly))
+		return std::nullopt;
+	// Reading once keeps the reveal off the disk: the overlay asks for a
+	// roster's worth of PNGs and this all runs on the OBS UI thread.
+	return m_cardCache.insert(path, file.readAll()).value();
+}
+
+void FffHttpServer::prepareRenditions()
+{
+	for (const QString &path : m_session->assetPaths())
+		ensureRendition(path);
+}
+
+void FffHttpServer::ensureRendition(const QString &path)
+{
+	if (m_renditionChecked.contains(path) || m_renditionJobs.contains(path))
+		return;
+	const QString target = FffAssetRendition::renditionPath(path);
+	if (QFileInfo::exists(target) || !FffAssetRendition::needsRendition(path)) {
+		m_renditionChecked.insert(path);
+		return;
+	}
+
+	m_renditionJobs.insert(path);
+	m_renditionPool.start([this, path, target]() {
+		const bool written = FffAssetRendition::writeRendition(path, target);
+		QMetaObject::invokeMethod(
+			this, [this, path, written]() { renditionFinished(path, written); }, Qt::QueuedConnection);
+	});
+}
+
+void FffHttpServer::renditionFinished(const QString &path, bool written)
+{
+	m_renditionJobs.remove(path);
+	m_renditionChecked.insert(path);
+	if (!written)
+		obs_log(LOG_WARNING, "could not shrink %s; serving it at full size", path.toUtf8().constData());
+
+	const QList<QPointer<QTcpSocket>> waiting = m_waitingRenditions.take(path);
+	if (waiting.isEmpty())
+		return;
+	const std::optional<QByteArray> bytes = cardBytes(path);
+	for (const QPointer<QTcpSocket> &socket : waiting) {
+		if (!socket || !m_conns.contains(socket))
+			continue;
+		if (bytes)
+			send(socket, 200, "image/png", *bytes, "public, max-age=31536000, immutable");
+		else
+			send(socket, 404, "text/plain; charset=utf-8", "no asset");
+	}
 }

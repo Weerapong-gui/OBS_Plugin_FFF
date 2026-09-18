@@ -7,6 +7,11 @@
   --text: #f4f6f8;
   --muted: #9aa4b0;
   --accent: #4d9dff;
+  --amber: #ffb02e;
+  /* --edge stays for decorative hairlines; interactive controls need a boundary
+     that clears 3:1 against the panels they sit on. */
+  --border: #3a4452;
+  --ring: #4d9dff;
   font-family: "Noto Sans Thai", "IBM Plex Sans Thai", Thonburi, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -16,22 +21,40 @@
 .template-panel h2 { margin: 0; font-size: 20px; }
 .template-panel p { color: var(--muted); font-size: 13px; }
 .template-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
-.template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 8px; }
+.template-panel button, .template-panel input, .template-panel select, .template-panel textarea { background: #252e3a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 .template-panel button { cursor: pointer; }
-.template-panel button:disabled { opacity: 0.45; cursor: default; }
-#templateViewport { height: 340px; overflow: auto; position: relative; touch-action: none; background-color: #252a32;
+.template-panel button:disabled { opacity: 0.55; cursor: default; }
+/* Panning replaces the scrollbars, so the stage is clipped and its position is
+   owned entirely by the view transform. */
+#templateViewport { height: 340px; overflow: hidden; position: relative; touch-action: none; background-color: #252a32;
   background-image: conic-gradient(#343a43 25%, transparent 0 50%, #343a43 0 75%, transparent 0);
   background-size: 20px 20px; }
-#templateStage { position: absolute; left: 48px; top: 90px; width: 420px; height: 152px; transform-origin: top left; }
-#templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; transform: translate(2px, 2px); }
+#templateStage { position: absolute; left: 0; top: 0; width: 420px; height: 152px; transform-origin: top left; }
+/* The stage's slot has no border, so a box drawn here sits exactly where the
+   template box says — no 2px allowance to keep in step with the stylesheet. */
+#templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; }
 #templateResize { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; padding: 0; border-radius: 0; background: var(--accent); pointer-events: auto; cursor: nwse-resize; }
-#templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; transform: translate(2px, 2px); }
+#templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; }
 #templatePlaceholder[hidden] { display: none; }
+/* The panel swaps between the card, logo and counter templates, and each of
+   these carries its own display rule that would otherwise outrank [hidden]. */
+.template-panel [hidden], #templateLayers[hidden], #templateFontFields[hidden],
+#templateCount[hidden] { display: none; }
 #templateLayers { display: grid; gap: 5px; }
 #templateLayers [aria-pressed="true"] { border-color: var(--accent); background: #234666; }
 .template-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .template-fields label { display: grid; gap: 4px; }
-.template-fields input { width: 100%; }
+/* The title's words get a field of their own: it is the only one on this panel
+   that is more than a number, and newlines in it are the two-line title. */
+.template-text { display: grid; gap: 4px; margin-bottom: 8px; font-size: 13px; }
+.template-text textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; line-height: 1.4; }
+.template-fields input, .template-fields select { width: 100%; min-width: 0; }
+/* A colour input collapses to a hairline under the panel's shared padding. */
+.template-fields input[type="color"] { height: 38px; padding: 2px; cursor: pointer; }
+/* The sample is the only way to tell a family apart before it goes on air. */
+.font-preview { margin: 8px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: #0e1319; font-size: 26px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-synthesis: none; font-variant-numeric: tabular-nums; }
 @media (max-width: 1000px) { .monitor-workspace { grid-template-columns: minmax(0, 1fr); } }
 
 * {
@@ -59,7 +82,7 @@ body.phone {
 
 .phone .session-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .phone .session-top [role="status"] { color:var(--green); font-weight:700; }
-.phone .session-top [role="status"].offline { color:#ffb02e; }
+.phone .session-top [role="status"].offline { color:var(--amber); }
 .phone .secondary { border:1px solid var(--edge); border-radius:10px; padding:11px 14px; background:#252e3a; color:var(--text); font-weight:700; }
 .phone .eyebrow { color:var(--accent); font-size:12px; letter-spacing:1.5px; margin:0 0 8px; }
 .phone .login-hint { color:var(--muted); margin:6px 0 16px; }
@@ -135,7 +158,7 @@ body.phone {
   font-weight: 800;
   color: #fff;
   opacity: 0.45;
-  transition: opacity 0.12s ease, border-color 0.12s ease;
+  transition: opacity var(--fff-dur-flag, 120ms) ease, border-color var(--fff-dur-flag, 120ms) ease;
 }
 
 .flag.red {
@@ -164,7 +187,7 @@ body.phone {
 }
 
 .status.offline {
-  color: #ffb02e;
+  color: var(--amber);
 }
 
 /* ---------- the board itself (overlay + monitor) ---------- */
@@ -193,13 +216,15 @@ body.phone {
   color: var(--muted);
 }
 
+/* Both boards use the same 1920 x 1080 geometry in preview and on air, and
+   place every piece themselves: Show Status stacks its rows at the upper left
+   the way the broadcast artwork draws them (STATUS_STACK in board.js), and the
+   operator moves any of them from there. */
 .board {
   position: relative;
-  display: grid;
-  /* Column count is set from the roster size so the board hugs its content —
-     the position and symmetry readout mean nothing if it is padded out. */
-  gap: 28px 34px;
-  width: max-content;
+  display: block;
+  width: 1920px;
+  height: 1080px;
 }
 
 .piece {
@@ -209,10 +234,31 @@ body.phone {
   pointer-events: auto;
 }
 
+/* The title above the stack. Its box, type and colour are the operator's, so
+   nothing here may pin one of them — the same rule the flag counters keep.
+   Synthesis is off so a weight the face does not really have falls back the
+   same way in the panel and on air instead of being faked differently. */
 .heading-piece {
-  width: max-content;
-  margin-bottom: 20px;
+  position: absolute;
+  left: 54px;
+  top: 72px;
+  width: 420px;
+  height: 100px;
 }
+
+.heading-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  white-space: pre-line;
+  font-synthesis: none;
+}
+
+/* A title with nothing in it is still a piece the operator has to be able to
+   grab, so the monitor keeps its box visible. */
+.monitor .heading-piece.empty-heading { outline: 2px dashed #88929f; }
 
 .piece > .slot {
   width: 100%;
@@ -233,22 +279,29 @@ body.phone {
   outline-offset: 5px;
 }
 
+/* The size here is only the empty-slot frame, and it is the reference
+   artwork's own card so an empty roster reads as one row per president
+   (EMPTY_SLOT in board.js keeps the same pair). A slot holding artwork is
+   sized from that PNG, so the slot's box is the picture's box. The placement
+   frame is an outline rather than a border for the same reason: under the
+   file's border-box sizing a border would eat 4px of the picture. */
 .slot {
-  width: 420px;
-  height: 152px;
+  width: 346px;
+  height: 51px;
   position: relative;
   background: transparent;
-  border: 2px solid transparent;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
   border-radius: 0;
   overflow: visible;
-  transition: border-color 0.25s ease, background 0.25s ease;
+  transition: outline-color var(--fff-dur-slot, 250ms) ease, background var(--fff-dur-slot, 250ms) ease;
 }
 
 /* The operator needs a visible placement frame before voting, but the on-air
    overlay should contain only the imported PNG and any flag-result colour. */
 .monitor .slot.waiting {
   background: rgba(244, 246, 248, 0.12);
-  border-color: rgba(244, 246, 248, 0.4);
+  outline-color: rgba(244, 246, 248, 0.4);
 }
 
 .slot .card-image {
@@ -286,7 +339,7 @@ body.phone {
 }
 
 .reveal-in {
-  animation: pop 0.35s ease;
+  animation: pop var(--fff-dur-reveal, 350ms) ease;
 }
 
 @keyframes pop {
@@ -311,6 +364,49 @@ body.overlay {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+}
+
+/* The overlay builds and measures both boards while the stream is still clean,
+   so a blank board keeps its layout instead of being torn out of the box tree.
+   The mode that is not on deck only needs its boxes: visibility:hidden paints
+   nothing, which costs nothing. */
+.overlay .board-wrap[hidden] {
+  display: block;
+  visibility: hidden;
+}
+
+/* The mode on deck is the one the next press puts on air, so it is painted
+   ahead of time: the raster tiles and the PNG textures are ready before the
+   operator touches anything, and zero opacity keeps the stream clean. Without
+   this the reveal frame is the first time any of it is drawn, which is what
+   made the first press of a session stutter.
+
+   The hint stays on across the reveal so the compositor keeps the same layer
+   instead of building a new one at the worst possible moment. */
+.overlay .board-wrap.on-deck {
+  will-change: opacity;
+}
+
+.overlay .board-wrap[hidden].on-deck {
+  visibility: visible;
+  opacity: 0;
+}
+
+/* Same idea one level down: the pieces are promoted while they are still off
+   air, so the entrance does not start by creating eighteen layers. Resting
+   pieces still release the hint, because .is-animating carries it from here. */
+.overlay .board-wrap[hidden].on-deck .bottom-motion {
+  will-change: transform, opacity;
+}
+
+/* Show Status cards slide in one after another. They are promoted while on
+   deck, and while animating, so the entrance never starts by creating a layer
+   per card. The Bottom Bar has its own rules above. */
+.overlay .board-wrap[hidden].on-deck .board:not(.bottom-bar) > .piece > .slot,
+.overlay .board-wrap[hidden].on-deck .board:not(.bottom-bar) > .piece > .heading-text,
+.overlay .board:not(.bottom-bar) > .piece.is-animating > .slot,
+.overlay .board:not(.bottom-bar) > .piece.is-animating > .heading-text {
+  will-change: transform, opacity;
 }
 
 /* ---------- monitor ---------- */
@@ -365,9 +461,9 @@ body.monitor {
   transform-origin: top left;
 }
 
-.draggable {
+/* Holding Space turns a preview into the hand tool. */
+.is-panning {
   cursor: grab;
-  touch-action: none;
 }
 
 .monitor .canvas.show-grid {
@@ -377,8 +473,43 @@ body.monitor {
   background-size: 60px 60px;
 }
 
-.draggable:active {
+.is-panning.grabbing {
   cursor: grabbing;
+}
+
+/* Floats over the preview so the zoom readout never costs the board any room. */
+.zoom-bar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(10, 13, 18, 0.82);
+  border: 1px solid var(--border);
+  user-select: none;
+}
+
+.zoom-bar button {
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  color: var(--text);
+  background: #252e3a;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.zoom-bar output {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .guide {
@@ -387,7 +518,7 @@ body.monitor {
   opacity: 0;
   z-index: 1;
   pointer-events: none;
-  transition: opacity 0.08s linear;
+  transition: opacity var(--fff-dur-guide, 80ms) linear;
 }
 
 .guide.on {
@@ -432,25 +563,64 @@ body.monitor {
 
 .controls {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 12px;
 }
 
+/* Twenty-odd controls in one flat row read as noise. Grouping them by the job
+   they do gives the operator somewhere to aim. */
+.control-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+}
+
+.control-group .group-label {
+  color: var(--muted);
+}
+
 .controls button, .controls select {
+  min-height: 32px;
   padding: 8px 14px;
   border-radius: 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--border);
   background: #1a212b;
   color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--fff-dur-control, 150ms) ease, background var(--fff-dur-control, 150ms) ease;
 }
+
+.controls button:hover:enabled, .controls select:hover:enabled {
+  border-color: var(--ring);
+}
+
 .grid-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .grid-tools label { color: var(--muted); }
 .grid-tools input { width: 55px; padding: 6px; }
 
 .controls input[type="range"] {
   accent-color: var(--accent);
+}
+
+/* Every control on this page is reachable by keyboard, so every control has to
+   show where the keyboard is. */
+.monitor :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Selected state as a ring rather than a fill, so it reads the same on the
+   neutral grid button and on the green and red flag buttons. */
+.monitor .controls [aria-pressed="true"],
+.monitor .flag-controls [aria-pressed="true"] {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 2px var(--text);
 }
 
 .piece-options {
@@ -484,17 +654,31 @@ body.monitor {
 .layer-controls button {
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--edge);
+  border: 1px solid var(--border);
   background: #1a212b;
   color: var(--text);
 }
+
+.status-controls { display: inline-flex; align-items: center; gap: 8px; }
+.status-controls[hidden], .flag-controls[hidden], .status-assets[hidden] { display: none; }
+.status-controls .status-qualified { background: var(--green); }
+.status-controls .status-unqualified { background: var(--red); }
+.status-controls .status-waiting { background: #3a424e; }
+.status-controls [aria-pressed="true"] { outline: 2px solid var(--ring); outline-offset: 2px; }
+.status-assets { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+.status-assets label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.status-assets input[type="file"] { max-width: 190px; color: var(--muted); }
+/* A status that already has artwork reads differently from an empty one. */
+.status-assets label.has-asset { color: var(--text); }
+.status-assets label.has-asset::before { content: "\2713"; color: var(--green); }
 
 .flag-controls .flag-none { background: #3a424e; }
 .flag-controls .flag-green { background: var(--green); }
 .flag-controls .flag-red { background: var(--red); }
 
-.controls button:disabled, .controls input:disabled {
-  opacity: 0.45;
+.controls button:disabled, .controls select:disabled, .controls input:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .controls label {
@@ -522,19 +706,102 @@ body.monitor {
 /* Bottom bar uses the same 1920 × 1080 geometry in preview and on air. */
 .board.bottom-bar { display: block; width: 1920px; height: 1080px; }
 .bottom-bar .slot, .monitor .bottom-bar .slot.waiting,
-#templateSlot.bottom-template { border: 0; background: transparent; }
+#templateSlot.bottom-template { outline: 0; background: transparent; }
 .bottom-bar .center-logo { position: absolute; left: 850px; top: 830px; width: 220px; height: 250px; }
 .center-logo img { width: 100%; height: 100%; object-fit: contain; }
 .bottom-bar .bottom-cover { position:absolute; left:0; top:0; width:1920px; height:1080px; }
 .bottom-cover img { width:100%; height:100%; object-fit:contain; }
 .monitor .bottom-cover { pointer-events:none; }
 .monitor .bottom-cover.selected { pointer-events:auto; }
-.bottom-motion { width:100%; height:100%; }
+.bottom-motion { position:relative; width:100%; height:100%; }
+.bottom-wipe { position:absolute; top:0; height:12px; pointer-events:none; z-index:2147483647; }
 .center-logo .bottom-motion img { width:100%; height:100%; object-fit:contain; }
-.overlay .bottom-bar .bottom-motion { will-change:transform,opacity; }
+.overlay .bottom-bar .bottom-motion.is-animating { will-change:transform,opacity; }
 .monitor .empty-logo { outline: 2px dashed #88929f; }
 .monitor .empty-logo::after { content: "โลโก้กลาง"; margin: auto; color: #88929f; }
+
+/* Flag counters. The default boxes sit above the logo column; the operator
+   moves them from the monitor like any other piece. */
+.bottom-bar .count-card { position: absolute; top: 690px; width: 110px; height: 130px; }
+.bottom-bar .count-red { left: 850px; }
+.bottom-bar .count-green { left: 960px; }
+/* Family, size, weight and colour all come from the counter template. Nothing
+   here may pin one of them, or the panel and the stream disagree. Synthesis is
+   off so a weight the font has no real face for falls back to the nearest one
+   it does have, the same way in the panel and on air, instead of being faked
+   differently in each. */
+.count-value { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  display: grid; place-items: center; line-height: 1;
+  font-synthesis: none; font-variant-numeric: tabular-nums; }
+.count-red .count-value { color: var(--red); }
+.count-green .count-value { color: var(--green); }
+/* Colour and family are the counter template's job; these are the fallbacks it
+   leaves in place when the operator has not chosen anything. */
+/* A counter resting on zero is still a piece the operator has to be able to
+   grab, so the monitor keeps its box visible. */
+.monitor .count-card { outline: 2px dashed #88929f; }
 .opacity-controls { display: inline-flex; gap: 10px; flex-wrap: wrap; }
 .opacity-controls input { width: 70px; }
 
 .grid-tools[hidden] { display: none; }
+
+/* Artwork that will overlap the row below it. Amber like the air warning: it
+   is something to fix before the show, not an error. */
+.stack-warning { color: var(--amber); margin: 0; }
+.stack-warning[hidden] { display: none; }
+
+/* The timing panel is one group of number fields per family of motion. */
+.timing-group { margin: 0 0 14px; }
+.timing-group h3 { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.timing-group .template-fields label { font-size: 12px; }
+
+/* ---------- monitor: pinned tools and side tabs ---------- */
+
+/* The tools the layout operator reaches for most stay on screen however far
+   the page scrolls. */
+.monitor-top { position: sticky; top: 0; z-index: 20; margin: -16px -16px 12px; padding: 12px 16px 10px;
+  background: #0e1116; border-bottom: 1px solid var(--edge); }
+.monitor-top .bar { flex-wrap: wrap; margin-bottom: 8px; }
+.air-pill { padding: 4px 10px; border-radius: 999px; font-weight: 800; color: #fff; background: var(--grey); }
+.air-pill:empty { display: none; }
+.air-pill[data-air="on"] { background: var(--red); }
+.bar-round { color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-save { margin: 0 0 0 auto; color: var(--muted); font-size: 13px; }
+.top-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.top-tools .piece-options { margin-top: 0; }
+.segmented { position: relative; display: inline-flex; align-items: center; }
+.segmented .group-label { margin-right: 8px; color: var(--muted); }
+.segmented input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.segmented label { padding: 8px 14px; border: 1px solid var(--border); background: #1a212b; color: var(--text);
+  font-weight: 700; cursor: pointer; }
+.segmented label:first-of-type { border-radius: 8px 0 0 8px; }
+.segmented label:last-of-type { border-left: 0; border-radius: 0 8px 8px 0; }
+.segmented input:checked + label { background: var(--accent); border-color: var(--accent); color: #0e1116; }
+.segmented input:focus-visible + label { outline: 2px solid var(--ring); outline-offset: 2px; }
+.top-select { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
+.top-select select { width: min(280px, 60vw); min-height: 34px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: #1a212b; color: var(--text); }
+.monitor-top .piece-options button { min-height: 32px; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--border); cursor: pointer; }
+.monitor-top .piece-options button:disabled { opacity: 0.45; cursor: not-allowed; }
+.air-warning { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber); color: #0e1116;
+  font-weight: 700; }
+.air-warning[hidden] { display: none; }
+.zoom-grid { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 12px;
+  color: var(--muted); }
+.canvas-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 8px; }
+.canvas-footer .hint { margin: 0; }
+.side-panel { min-width: 0; padding: 12px 16px 16px; background: #161b22; border: 1px solid var(--edge);
+  border-radius: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--edge); }
+.tabs [role="tab"] { padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+  color: var(--muted); font-weight: 700; cursor: pointer; }
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs [role="tab"]:disabled { opacity: 0.45; cursor: not-allowed; }
+/* .controls and friends set display, which would otherwise outrank [hidden]. */
+.side-panel [role="tabpanel"][hidden], #statusAssetsHint[hidden] { display: none; }
+.side-panel .controls { margin-top: 0; }
+.side-panel .template-panel { padding: 0; background: none; border: 0; border-radius: 0; }
+.side-panel .status-assets { margin-top: 0; }
+.status-assets input:disabled, .status-assets button:disabled { opacity: 0.45; cursor: not-allowed; }
+#resetAll.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }

@@ -3,16 +3,42 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FFF Flag Board — Monitor</title>
+<title>FFF Flag Board · Monitor</title>
 <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="monitor">
 
-<div class="bar">
-  <div class="bar-title">จอมอนิเตอร์</div>
-  <div id="status" class="bar-status"></div>
-  <div id="warn" class="bar-warn hidden">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
-</div>
+<header class="monitor-top">
+  <div class="bar">
+    <div class="bar-title">จอมอนิเตอร์</div>
+    <div id="status" class="bar-status air-pill" role="status" data-air="blank"></div>
+    <div id="roundStatus" class="bar-round"></div>
+    <p id="saveStatus" class="bar-save" role="status"></p>
+    <div id="warn" class="bar-warn hidden" role="alert">ขาดการเชื่อมต่อกับปลั๊กอิน</div>
+    <div id="accessDenied" class="bar-warn hidden" role="alert">กุญแจถูกเปลี่ยนหรือปิดสิทธิ์แล้ว — ขอลิงก์ใหม่จาก operator</div>
+  </div>
+  <div class="top-tools">
+    <div id="editMode" class="segmented" role="radiogroup" aria-label="แก้ไขโหมด">
+      <span class="group-label">แก้ไขโหมด</span>
+      <input type="radio" name="editMode" id="editModeScoreboard" value="scoreboard" checked /><label for="editModeScoreboard">Show Status</label>
+      <input type="radio" name="editMode" id="editModeBottomBar" value="bottomBar" /><label for="editModeBottomBar">BOTTOM BAR</label>
+    </div>
+    <label class="top-select">ชิ้นงาน <select id="selection"></select></label>
+    <div id="cardControls" class="piece-options">
+      <span class="flag-controls">ธง
+        <button class="flag-none" data-vote="none" disabled title="เลือกการ์ดก่อน">ยังไม่กำหนด</button>
+        <button class="flag-green" data-vote="green" disabled title="เลือกการ์ดก่อน">เขียว</button>
+        <button class="flag-red" data-vote="red" disabled title="เลือกการ์ดก่อน">แดง</button>
+      </span>
+      <span id="statusControls" class="status-controls">สถานะ
+        <button class="status-qualified" data-status="qualified" disabled title="เลือกการ์ดก่อน">QUALIFIED</button>
+        <button class="status-unqualified" data-status="unqualified" disabled title="เลือกการ์ดก่อน">UNQUALIFIED</button>
+        <button class="status-waiting" data-status="waiting" disabled title="เลือกการ์ดก่อน">WAITING</button>
+      </span>
+    </div>
+  </div>
+  <div id="airWarning" class="air-warning" role="alert" hidden>⚠ กำลังแก้โหมดที่ออกอากาศอยู่ — ย้าย/เปลี่ยนธง คนดูเห็นทันที</div>
+</header>
 
 <div class="monitor-workspace"><section class="board-panel">
 <div id="frame" class="frame">
@@ -28,61 +54,94 @@
       <div id="board" class="board"></div>
     </div>
   </div>
+  <div id="canvasZoom" class="zoom-bar" role="group" aria-label="มุมมอง">
+    <button id="canvasZoomOut" aria-label="ซูมออก">−</button><output id="canvasZoomValue"></output><button id="canvasZoomIn" aria-label="ซูมเข้า">+</button><button id="canvasZoomActual">1:1</button><button id="canvasZoomFit">พอดีจอ</button>
+    <label class="zoom-grid"><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
+  </div>
 </div>
-
-<div class="controls">
-  <label>โหมดแก้ไข <select id="editMode"><option value="scoreboard">SCOREBOARD</option><option value="bottomBar">BOTTOM BAR</option></select></label>
-  <label>เลือก <select id="selection"></select></label>
-  <label><input id="showGrid" type="checkbox" checked /> เส้นตาราง</label>
-  <span class="grid-tools"><label>คอลัมน์ <input id="gridColumns" type="number" min="1" max="3" value="3" /></label><label>ห่าง X <input id="gridGapX" type="number" min="0" max="300" value="34" /></label><label>ห่าง Y <input id="gridGapY" type="number" min="0" max="300" value="28" /></label><button id="gridPreview">ดูตัวอย่างตาราง</button><button id="gridApply" disabled>ใช้ตาราง</button><button id="gridCancel" disabled>ยกเลิกตาราง</button></span>
-  <button id="centerX">กึ่งกลางแนวนอน</button>
-  <button id="centerY">กึ่งกลางแนวตั้ง</button>
-  <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
-  <button id="resetAll">รีเซ็ตทั้งหมด</button>
-  <label hidden><span id="scaleXLabel">กว้าง</span> <input id="scaleX" type="range" min="50" max="200" step="1" /></label>
-  <span id="scaleXValue" hidden></span>
-  <label hidden><span id="scaleYLabel">สูง</span> <input id="scaleY" type="range" min="50" max="200" step="1" /></label>
-  <span id="scaleYValue" hidden></span>
-  <span class="opacity-controls">
-    <label>PNG % <input id="imageOpacity" type="number" min="0" max="100" value="100" /></label>
-    <label>สีธง % <input id="resultOpacity" type="number" min="0" max="100" value="100" /></label>
-    <label>ชิ้นงานกว้าง % <input id="pieceWidth" type="number" min="50" max="200" value="100" /></label>
-    <label>ชิ้นงานสูง % <input id="pieceHeight" type="number" min="50" max="200" value="100" /></label>
-  </span>
-  <span class="layer-controls">Layer
-    <button data-layer="front">หน้าสุด</button>
-    <button data-layer="forward">ขึ้น</button>
-    <button data-layer="backward">ลง</button>
-    <button data-layer="back">หลังสุด</button>
-  </span>
-  <span id="symmetry" class="symmetry"></span>
+<div class="canvas-footer">
+  <p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ลูกศรขยับ 1px</p>
+  <output id="symmetry" class="symmetry"></output>
+  <p id="stackWarning" class="hint stack-warning" role="status" hidden></p>
 </div>
-<div id="cardControls" class="piece-options" hidden>
-  <span class="flag-controls">กำหนดธง
-    <button class="flag-none" data-vote="none">ยังไม่กำหนด</button>
-    <button class="flag-green" data-vote="green">เขียว</button>
-    <button class="flag-red" data-vote="red">แดง</button>
-  </span>
-</div>
-<p id="saveStatus" class="hint" role="status"></p>
-<p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ดูตัวอย่างตารางก่อนกดใช้ · ตารางช่องละ 60px</p>
 </section>
-<aside class="template-panel">
-  <h2>แม่แบบทุกการ์ด</h2>
-  <p>แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
+<aside class="side-panel">
+  <div class="tabs" role="tablist" aria-label="เครื่องมือ">
+    <button type="button" role="tab" id="tab-position" aria-controls="panel-position" aria-selected="true">ตำแหน่ง</button>
+    <button type="button" role="tab" id="tab-grid" aria-controls="panel-grid" aria-selected="false" tabindex="-1">ตาราง</button>
+    <button type="button" role="tab" id="tab-template" aria-controls="panel-template" aria-selected="false" tabindex="-1">แม่แบบ</button>
+    <button type="button" role="tab" id="tab-status-png" aria-controls="panel-status-png" aria-selected="false" tabindex="-1">PNG สถานะ</button>
+    <button type="button" role="tab" id="tab-timing" aria-controls="panel-timing" aria-selected="false" tabindex="-1">จังหวะ</button>
+  </div>
+  <section id="panel-position" class="controls" role="tabpanel" aria-labelledby="tab-position">
+    <div class="control-group" role="group" aria-label="ตำแหน่ง">
+      <button id="centerX">กึ่งกลางแนวนอน</button>
+      <button id="centerY">กึ่งกลางแนวตั้ง</button>
+    </div>
+    <div class="control-group opacity-controls" role="group" aria-label="ขนาดและความทึบ">
+      <label>PNG % <input id="imageOpacity" type="number" min="0" max="100" value="100" /></label>
+      <label>สีธง % <input id="resultOpacity" type="number" min="0" max="100" value="100" /></label>
+      <label>ชิ้นงานกว้าง % <input id="pieceWidth" type="number" min="50" max="200" value="100" /></label>
+      <label>ชิ้นงานสูง % <input id="pieceHeight" type="number" min="50" max="200" value="100" /></label>
+    </div>
+    <div class="control-group layer-controls" role="group" aria-label="ลำดับชั้น">
+      <span class="group-label">Layer</span>
+      <button data-layer="front">หน้าสุด</button>
+      <button data-layer="forward">ขึ้น</button>
+      <button data-layer="backward">ลง</button>
+      <button data-layer="back">หลังสุด</button>
+    </div>
+    <div class="control-group" role="group" aria-label="รีเซ็ต">
+      <button id="reset">รีเซ็ตชิ้นที่เลือก</button>
+      <button id="resetAll">รีเซ็ตทั้งหมด</button>
+    </div>
+  </section>
+  <section id="panel-grid" class="controls" role="tabpanel" aria-labelledby="tab-grid" hidden>
+    <div class="control-group grid-tools" role="group" aria-label="ตาราง">
+      <label>คอลัมน์ <input id="gridColumns" type="number" min="1" max="3" value="3" /></label>
+      <label>ห่าง X <input id="gridGapX" type="number" min="0" max="300" value="34" /></label>
+      <label>ห่าง Y <input id="gridGapY" type="number" min="0" max="300" value="28" /></label>
+      <button id="gridPreview" aria-pressed="false">ดูตัวอย่างตาราง</button>
+      <button id="gridApply" disabled>ใช้ตาราง</button>
+      <button id="gridCancel" disabled>ยกเลิกตาราง</button>
+    </div>
+    <p class="hint">ดูตัวอย่างตารางก่อนกดใช้ · ใช้ได้เฉพาะโหมด Show Status</p>
+  </section>
+  <section id="panel-template" class="template-panel" role="tabpanel" aria-labelledby="tab-template" hidden>
+  <h2 id="templateTitle">แม่แบบทุกการ์ด</h2>
+  <p id="templateHint">แก้ตัวอย่าง แล้วกดใช้เพื่ออัปเดตทุกการ์ด</p>
   <div class="template-toolbar">
-    <button id="templateZoomOut">−</button><output id="templateZoomValue"></output>
-    <button id="templateZoomIn">+</button><button id="templateFit">พอดีจอ</button>
-    <label>ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
+    <button id="templateZoomOut" aria-label="ซูมออก">−</button><output id="templateZoomValue"></output>
+    <button id="templateZoomIn" aria-label="ซูมเข้า">+</button><button id="templateZoomActual">1:1</button><button id="templateFit">พอดีจอ</button>
+    <label id="templateColorField">ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
   </div>
   <div id="templateViewport"><div id="templateStage">
-    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div></div>
+    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div><div id="templateCount" class="count-value" hidden></div><div id="templateHeading" class="heading-text" hidden></div></div>
     <div id="templatePlaceholder">PNG ของแต่ละการ์ด</div>
     <div id="templateSelection"><button id="templateResize" aria-label="ลากปรับขนาด"></button></div>
   </div></div>
   <p class="hint">ลากเพื่อย้าย · ลากมุมเพื่อปรับขนาด · Shift + ลากมุม เพื่อรักษาสัดส่วน · เลเยอร์บนสุดอยู่ด้านหน้า</p>
   <div id="templateLayers" role="group" aria-label="เลเยอร์แม่แบบ"></div>
-  <div class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div id="templateLayerTools" class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div id="templateHeadingFields" hidden>
+    <label class="template-text">ข้อความ <textarea id="templateText" rows="3" maxlength="200" placeholder="COMPETITION&#10;STATUS"></textarea></label>
+    <div class="template-fields">
+      <label>ระยะบรรทัด px <input id="templateLineHeight" type="number" min="8" max="400" step="1" value="42" /></label>
+      <label>จัดชิด <select id="templateAlign"><option value="left">ซ้าย</option><option value="center">กึ่งกลาง</option><option value="right">ขวา</option></select></label>
+    </div>
+  </div>
+  <div id="templateFontFields" hidden>
+    <div class="template-fields">
+      <label>ฟอนต์ในเครื่อง <select id="templateFont"><option value="">ค่าเริ่มต้นของระบบ</option></select></label>
+      <label>พิมพ์ชื่อฟอนต์เอง <input id="templateFontManual" type="text" maxlength="120" placeholder="เช่น Bai Jamjuree" /></label>
+      <label>น้ำหนัก <select id="templateFontWeight"></select></label>
+      <label>ขนาดตัวอักษร px <input id="templateFontSize" type="number" min="24" max="400" step="1" value="96" /></label>
+      <label>สีตัวเลข <input id="templateColorValue" type="color" value="#e23c3c" /></label>
+    </div>
+    <div class="template-toolbar"><button id="templateFontPick">ค้นหาฟอนต์ในเครื่อง</button></div>
+    <p id="templateFontPreview" class="font-preview">0123456789</p>
+    <p id="templateFontNote" class="hint"></p>
+  </div>
   <div class="template-fields">
     <label>Opacity % <input id="templateOpacity" type="number" min="0" max="100" value="100" /></label>
     <label>X <input id="templateX" type="number" min="-2000" max="2000" step="1" /></label>
@@ -90,13 +149,42 @@
     <label>กว้าง <input id="templateWidth" type="number" min="1" max="2000" step="1" /></label>
     <label>สูง <input id="templateHeight" type="number" min="1" max="2000" step="1" /></label>
   </div>
+  <p id="templateSizeNote" class="hint" hidden>Show Status ใช้ขอบของ PNG เป็นขอบการ์ด · กล่อง PNG จึงปรับขนาดที่นี่ไม่ได้ — ย่อหรือขยายด้วย ชิ้นงานกว้าง/สูง % ในแท็บตำแหน่ง</p>
   <div class="template-toolbar"><button id="templateApply">ใช้แม่แบบกับทุกการ์ด</button><button id="templateCancel">ยกเลิกการแก้ไข</button></div>
   <p id="templateStatus" role="status"></p>
+  </section>
+  <section id="panel-status-png" role="tabpanel" aria-labelledby="tab-status-png" hidden>
+    <div id="statusAssets" class="status-assets">
+      <label>QUALIFIED <input type="file" accept="image/png" data-asset="qualified" disabled /><button data-clear="qualified" disabled>ลบ</button></label>
+      <label>UNQUALIFIED <input type="file" accept="image/png" data-asset="unqualified" disabled /><button data-clear="unqualified" disabled>ลบ</button></label>
+      <label>WAITING <input type="file" accept="image/png" data-asset="waiting" disabled /><button data-clear="waiting" disabled>ลบ</button></label>
+    </div>
+    <p id="statusAssetsHint" class="hint">เลือกการ์ดก่อน แล้วอัปโหลด PNG ของแต่ละสถานะ</p>
+  </section>
+  <section id="panel-timing" class="template-panel" role="tabpanel" aria-labelledby="tab-timing" hidden>
+    <h2>จังหวะการเคลื่อนไหว</h2>
+    <p class="hint">ความยาวของแต่ละ animation หน่วยมิลลิวินาที · กดใช้แล้วมีผลทั้งจอมอนิเตอร์และภาพออกอากาศ</p>
+    <div id="timingFields"></div>
+    <div class="template-toolbar">
+      <button id="timingApply" disabled>ใช้จังหวะ</button>
+      <button id="timingCancel" disabled>ยกเลิกการแก้ไข</button>
+      <button id="timingDefaults">คืนค่าเริ่มต้น</button>
+    </div>
+    <p id="timingStatus" role="status"></p>
+  </section>
 </aside></div>
 
+<script src="/view-zoom.js"></script>
+<script src="/timing.js"></script>
 <script src="/board.js"></script>
 <script src="/template-editor.js"></script>
+<script src="/monitor-ui.js"></script>
 <script>
+// How long a save may hang before it is abandoned, and how often abandoned
+// saves are tried again. Network patience, not motion: the timing panel does
+// not offer these because changing them changes nothing on screen.
+const SAVE_TIMEOUT_MS = 5000;
+const SAVE_RETRY_MS = 3000;
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
 const SNAP = 0.015; // fraction of the canvas
@@ -107,16 +195,13 @@ const wrap = document.getElementById("wrap");
 const board = document.getElementById("board");
 const statusEl = document.getElementById("status");
 const warn = document.getElementById("warn");
-const scaleXInput = document.getElementById("scaleX");
-const scaleYInput = document.getElementById("scaleY");
-const scaleXLabel = document.getElementById("scaleXLabel");
-const scaleYLabel = document.getElementById("scaleYLabel");
-const scaleXValue = document.getElementById("scaleXValue");
-const scaleYValue = document.getElementById("scaleYValue");
 const symmetry = document.getElementById("symmetry");
 const selection = document.getElementById("selection");
 const saveStatus = document.getElementById("saveStatus");
 const cardControls = document.getElementById("cardControls");
+const roundStatus = document.getElementById("roundStatus");
+const airWarning = document.getElementById("airWarning");
+const accessDenied = document.getElementById("accessDenied");
 
 let sourceState = null;
 let editMode = "scoreboard";
@@ -136,12 +221,23 @@ const showGrid = document.getElementById("showGrid");
 showGrid.onchange = () => canvas.classList.toggle("show-grid", showGrid.checked);
 showGrid.onchange();
 
-function fitCanvas() {
-  const factor = frame.clientWidth / CANVAS_W;
-  canvas.style.transform = `scale(${factor})`;
-  return factor;
+// Zoom and pan are view state only: the transform lives on the canvas, never on
+// a piece, so nothing the operator saved moves when the preview does.
+const canvasView = createViewZoom({
+  frame: frame, content: canvas, width: CANVAS_W, height: CANVAS_H,
+  onChange: scale => { document.getElementById("canvasZoomValue").textContent = Math.round(scale * 100) + "%"; }
+});
+// Every measurement in canvas pixels reads the scale that is actually on screen
+// rather than assuming the preview is at fit.
+function canvasScale() {
+  return canvas.getBoundingClientRect().width / CANVAS_W || 1;
 }
-window.addEventListener("resize", () => { fitCanvas(); apply(); });
+function fitCanvas() { canvasView.fit(); return canvasScale(); }
+document.getElementById("canvasZoomIn").onclick = () => canvasView.zoomBy(1.25);
+document.getElementById("canvasZoomOut").onclick = () => canvasView.zoomBy(1 / 1.25);
+document.getElementById("canvasZoomActual").onclick = () => canvasView.actual();
+document.getElementById("canvasZoomFit").onclick = () => canvasView.fit();
+window.addEventListener("resize", () => { canvasView.refit(); apply(); });
 
 function projectedState() {
   const state = { ...lastState, pieces: { ...lastState.pieces }, layers: { ...lastState.layers } };
@@ -160,6 +256,39 @@ function projectedState() {
   return state;
 }
 
+// Flag, status and status-artwork controls belong to a card. They stay where
+// they are and say why they are unavailable, so choosing a piece never shifts
+// the canvas under the pointer.
+function setCardControls(isCard) {
+  for (const button of document.querySelectorAll("[data-vote], [data-status]")) {
+    if (button.dataset.busy) continue;
+    button.disabled = !isCard;
+    button.title = isCard ? "" : "เลือกการ์ดก่อน";
+  }
+  for (const control of document.querySelectorAll("#statusAssets input, #statusAssets button"))
+    control.disabled = !isCard;
+  document.getElementById("statusAssetsHint").hidden = isCard;
+}
+
+// A row's place on the Show Status stack is fixed, so artwork taller than the
+// pitch quietly overlaps the row below it. Say so in the preview rather than
+// let it reach the stream.
+function cardImageHeight(id) {
+  const piece = pieces.get("card:" + id);
+  const image = piece && piece.element.querySelector(".card-image");
+  return image ? image.naturalHeight : 0;
+}
+function stackWarning() {
+  const warning = document.getElementById("stackWarning");
+  const pitch = Math.round(STATUS_STACK.pitch);
+  const tall = editMode === "bottomBar" ? []
+    : lastState.presidents.filter(president => cardImageHeight(president.id) > STATUS_STACK.pitch);
+  warning.hidden = !tall.length;
+  if (!tall.length) return;
+  warning.textContent = `PNG สูงเกินระยะแถว ${pitch}px จะซ้อนแถวถัดไป · ` +
+    tall.map(president => `${president.name} ${cardImageHeight(president.id)}px`).join(" · ");
+}
+
 function apply() {
   if (!lastState) return;
   const overrides = new Map();
@@ -169,33 +298,41 @@ function apply() {
   for (const [key, piece] of pieces)
     piece.element.classList.toggle("selected", key === selected);
   const piece = pieces.get(selected);
-  for (const id of ["centerX", "centerY", "reset", "scaleX", "scaleY"])
+  for (const id of ["centerX", "centerY", "reset"])
     document.getElementById(id).disabled = !piece;
   for (const button of document.querySelectorAll("[data-layer]"))
     button.disabled = !piece;
-  cardControls.hidden = !piece;
+  setCardControls(!!piece && selected.startsWith("card:"));
+  // A vote button is a choice, not a fire-and-forget action: say which colour
+  // the selected card is actually on.
+  const vote = selected.startsWith("card:") &&
+    (lastState.presidents.find(p => "card:" + p.id === selected) || {}).vote;
+  for (const button of document.querySelectorAll("[data-vote]"))
+    button.setAttribute("aria-pressed", String(button.dataset.vote === (vote || "none")));
   templateEditor.update(lastState, selected);
-  if (!piece) { symmetry.textContent = ""; scaleXValue.textContent = ""; scaleYValue.textContent = ""; return; }
+  stackWarning();
+  if (!piece) { symmetry.textContent = ""; return; }
   const layout = piece.layout;
-  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", (!selected.startsWith("card:") ? 1 : lastState.cardTemplate?.image?.opacity) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
+  for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", templateOpacity(lastState, selected) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
     document.getElementById(id).value = Math.round((layout[key] ?? fallback) * 100);
-  document.getElementById("resultOpacity").disabled = !selected.startsWith("card:");
   const isCard = selected.startsWith("card:");
-  const scaleX = isCard ? layout.resultScaleX : layout.scaleX;
-  const scaleY = isCard ? layout.resultScaleY : layout.scaleY;
-  scaleXLabel.textContent = isCard ? "พื้นผลธง กว้าง" : "กว้าง";
-  scaleYLabel.textContent = isCard ? "พื้นผลธง สูง" : "สูง";
-  scaleXInput.value = Math.round(scaleX * 100);
-  scaleYInput.value = Math.round(scaleY * 100);
-  scaleXValue.textContent = Math.round(scaleX * 100) + "%";
-  scaleYValue.textContent = Math.round(scaleY * 100) + "%";
-  const width = piece.element.offsetWidth * layout.scaleX * (isCard ? scaleX : 1);
+  document.getElementById("resultOpacity").disabled = !isCard;
+  const status = isCard &&
+    (lastState.presidents.find(p => "card:" + p.id === selected) || {}).status;
+  for (const button of document.querySelectorAll("[data-status]"))
+    button.setAttribute("aria-pressed", String(button.dataset.status === (status || "waiting")));
+  for (const input of document.querySelectorAll("[data-asset]")) {
+    const person = lastState.presidents.find(p => "card:" + p.id === selected) || {};
+    input.closest("label").classList.toggle("has-asset", !!person[input.dataset.asset + "Url"]);
+  }
+  // The flag-colour backdrop is sized in the template editor, so the symmetry
+  // readout follows the template's result box for cards.
+  const width = piece.element.offsetWidth * layout.scaleX * (isCard ? layout.resultScaleX : 1);
   const left = Math.round(layout.x * CANVAS_W - width / 2);
   const right = Math.round(CANVAS_W - (layout.x * CANVAS_W + width / 2));
   const balanced = Math.abs(left - right) <= 2;
   symmetry.textContent = `ซ้าย ${left} · ขวา ${right} ${balanced ? "✓" : ""}`;
   symmetry.classList.toggle("ok", balanced);
-  cardControls.hidden = !isCard;
 }
 
 function showGuides(active) {
@@ -220,7 +357,7 @@ async function flush() {
   saving = true;
   const request = pending.values().next().value;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
   const key = request.mode + ":" + request.target;
   try {
     const res = await fetch("/api/layout", {
@@ -242,7 +379,7 @@ async function flush() {
     apply();
   } catch (err) {
     if (pending.get(key) === request) pending.delete(key);
-    saveStatus.textContent = "บันทึกไม่สำเร็จ — คืนค่าก่อนแก้ไขแล้ว";
+    saveStatus.textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว";
     apply();
   } finally {
     clearTimeout(timeout);
@@ -284,6 +421,7 @@ function commitDraft() {
 }
 
 function select(target) {
+  resetAllConfirm.disarm();
   commitDraft();
   selected = target;
   selection.value = target;
@@ -292,7 +430,7 @@ function select(target) {
 selection.onchange = () => select(selection.value);
 
 canvas.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || dragging) return;
+  if (event.button !== 0 || dragging || canvasView.panning) return;
   // The full-canvas cover is selected from the list. Even when selected,
   // hit-test the cards underneath first so it cannot trap the operator.
   let piece = event.target.closest(".piece");
@@ -317,7 +455,7 @@ canvas.addEventListener("pointerdown", (event) => {
 canvas.addEventListener("pointermove", (event) => {
   if (!dragging || !draft) return;
   const layout = draft.layout;
-  const factor = frame.clientWidth / CANVAS_W;
+  const factor = canvasScale();
   layout.x = layoutStart.x + (event.clientX - dragStart.x) / factor / CANVAS_W;
   layout.y = layoutStart.y + (event.clientY - dragStart.y) / factor / CANVAS_H;
 
@@ -354,31 +492,53 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("lostpointercapture", endDrag);
 
+// Cards are the size of their own artwork, so the grid is measured from the
+// cards themselves: a column is as wide as its widest card, a row as tall as
+// its tallest, and every card sits centred in its cell. With artwork that
+// happens to share one size this lands exactly where the old fixed cell did.
 function buildGridDraft() {
   const cards = [...pieces.entries()].filter(([key]) => key.startsWith("card:"));
   const columns = Math.max(1, Math.min(3, Number(document.getElementById("gridColumns").value) || 3));
   const gapX = Math.max(0, Number(document.getElementById("gridGapX").value) || 0);
   const gapY = Math.max(0, Number(document.getElementById("gridGapY").value) || 0);
-  const width = 420, height = 152, rows = Math.ceil(cards.length / columns);
-  const startX = (CANVAS_W - (columns * width + (columns - 1) * gapX)) / 2;
-  const startY = (CANVAS_H - (rows * height + (rows - 1) * gapY)) / 2;
+  // The draft resets every piece to scale 1, so the untransformed box is the
+  // size each card will have once the grid is applied.
+  const columnWidth = [], rowHeight = [];
+  cards.forEach(([, item], index) => {
+    const col = index % columns, row = Math.floor(index / columns);
+    columnWidth[col] = Math.max(columnWidth[col] || 0, item.element.offsetWidth);
+    rowHeight[row] = Math.max(rowHeight[row] || 0, item.element.offsetHeight);
+  });
+  const total = (sizes, gap) => sizes.reduce((sum, size) => sum + size, 0) + (sizes.length - 1) * gap;
+  const starts = (sizes, gap, extent) => {
+    let edge = (extent - total(sizes, gap)) / 2;
+    return sizes.map(size => { const at = edge; edge += size + gap; return at; });
+  };
+  const columnX = starts(columnWidth, gapX, CANVAS_W);
+  const rowY = starts(rowHeight, gapY, CANVAS_H);
   return new Map(cards.map(([key, item], index) => {
     const col = index % columns, row = Math.floor(index / columns);
-    return [key, { ...item.layout, x: (startX + col * (width + gapX) + width / 2) / CANVAS_W,
-      y: (startY + row * (height + gapY) + height / 2) / CANVAS_H, scale: 1, scaleX: 1, scaleY: 1 }];
+    return [key, { ...item.layout, x: (columnX[col] + columnWidth[col] / 2) / CANVAS_W,
+      y: (rowY[row] + rowHeight[row] / 2) / CANVAS_H, scale: 1, scaleX: 1, scaleY: 1 }];
   }));
+}
+// One place decides how the three grid buttons read, so the preview button's
+// pressed state can never drift from whether a preview is actually live.
+function showGridPreview(live) {
+  const previewing = !!(live && live.size);
+  document.getElementById("gridPreview").setAttribute("aria-pressed", String(previewing));
+  document.getElementById("gridApply").disabled = !previewing;
+  document.getElementById("gridCancel").disabled = !previewing;
 }
 document.getElementById("gridPreview").onclick = () => {
   gridDrafts = buildGridDraft();
-  document.getElementById("gridApply").disabled = !gridDrafts.size;
-  document.getElementById("gridCancel").disabled = !gridDrafts.size;
-  saveStatus.textContent = "กำลังดูตัวอย่างตาราง — กดใช้ตารางเพื่อบันทึก";
+  showGridPreview(gridDrafts);
+  saveStatus.textContent = "กำลังดูตัวอย่างตาราง กดใช้ตารางเพื่อบันทึก";
   apply();
 };
 document.getElementById("gridCancel").onclick = () => {
   gridDrafts = null;
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  showGridPreview(null);
   saveStatus.textContent = "ยกเลิกตัวอย่างตารางแล้ว";
   apply();
 };
@@ -386,8 +546,7 @@ document.getElementById("gridApply").onclick = () => {
   if (!gridDrafts) return;
   for (const [target, layout] of gridDrafts) queue({ target, layout });
   gridDrafts = null;
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  showGridPreview(null);
   saveStatus.textContent = "กำลังบันทึกตาราง…";
   apply();
 };
@@ -420,29 +579,17 @@ document.getElementById("reset").onclick = () => {
   draft = null;
   queue({ target: selected, reset: true });
 };
-document.getElementById("resetAll").onclick = () => {
+// Throwing away every placement asks twice.
+const resetAllConfirm = armConfirm(document.getElementById("resetAll"), () => {
   draft = null;
   for (const [key, request] of pending) if (request.mode === editMode) pending.delete(key);
   queue({ target: "all", reset: true });
-};
-scaleXInput.oninput = () => {
-  if (startDraft()) {
-    draft.layout[selected.startsWith("card:") ? "resultScaleX" : "scaleX"] = scaleXInput.value / 100;
-    apply();
-  }
-};
-scaleXInput.onchange = commitDraft;
-scaleYInput.oninput = () => {
-  if (startDraft()) {
-    draft.layout[selected.startsWith("card:") ? "resultScaleY" : "scaleY"] = scaleYInput.value / 100;
-    apply();
-  }
-};
-scaleYInput.onchange = commitDraft;
+}, { armedLabel: "กดอีกครั้งเพื่อรีเซ็ตทั้งหมด" });
 
 for (const button of document.querySelectorAll("[data-vote]")) {
   button.onclick = async () => {
     if (!selected.startsWith("card:")) return;
+    button.dataset.busy = "1";
     button.disabled = true;
     try {
       const res = await fetch("/api/operator/vote", {
@@ -452,11 +599,60 @@ for (const button of document.querySelectorAll("[data-vote]")) {
       if (!res.ok) throw new Error("vote failed");
       saveStatus.textContent = "ตั้งค่าสีธงแล้ว";
     } catch (err) {
-      saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ — ลองใหม่อีกครั้ง";
+      saveStatus.textContent = "ตั้งค่าสีธงไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
+      delete button.dataset.busy;
       button.disabled = false;
+      apply();
     }
   };
+}
+
+for (const button of document.querySelectorAll("[data-status]")) {
+  button.onclick = async () => {
+    if (!selected.startsWith("card:")) return;
+    button.dataset.busy = "1";
+    button.disabled = true;
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ presidentId: selected.slice(5), status: button.dataset.status })
+      });
+      if (!res.ok) throw new Error("status failed");
+      saveStatus.textContent = "ตั้งสถานะแล้ว";
+    } catch (err) {
+      saveStatus.textContent = "ตั้งสถานะไม่ได้ ลองใหม่อีกครั้ง";
+    } finally {
+      delete button.dataset.busy;
+      button.disabled = false;
+      apply();
+    }
+  };
+}
+
+// The PNG goes up as raw bytes; an empty body clears that status's artwork.
+async function sendAsset(kind, body) {
+  if (!selected.startsWith("card:")) return;
+  saveStatus.textContent = "กำลังอัปโหลด…";
+  try {
+    const res = await fetch(`/api/asset?presidentId=${encodeURIComponent(selected.slice(5))}&kind=${kind}`,
+      { method: "POST", headers: { "Content-Type": "image/png" }, body });
+    if (!res.ok) throw new Error("upload failed");
+    saveStatus.textContent = body ? "อัปโหลดภาพแล้ว" : "ลบภาพแล้ว";
+  } catch (err) {
+    saveStatus.textContent = "อัปโหลดไม่สำเร็จ ต้องเป็น PNG เท่านั้น";
+  }
+}
+for (const input of document.querySelectorAll("[data-asset]")) {
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    await sendAsset(input.dataset.asset, await file.arrayBuffer());
+    input.value = "";
+  };
+}
+for (const button of document.querySelectorAll("[data-clear]")) {
+  button.onclick = () => sendAsset(button.dataset.clear, new ArrayBuffer(0));
 }
 
 for (const button of document.querySelectorAll("[data-layer]")) {
@@ -471,7 +667,7 @@ for (const button of document.querySelectorAll("[data-layer]")) {
       if (!res.ok) throw new Error("layer failed");
       saveStatus.textContent = "บันทึกลำดับ layer แล้ว";
     } catch (err) {
-      saveStatus.textContent = "บันทึกลำดับ layer ไม่ได้ — ลองใหม่อีกครั้ง";
+      saveStatus.textContent = "บันทึกลำดับ layer ไม่ได้ ลองใหม่อีกครั้ง";
     } finally {
       button.disabled = false;
     }
@@ -480,6 +676,8 @@ for (const button of document.querySelectorAll("[data-layer]")) {
 
 function render(incoming) {
   sourceState = incoming;
+  applyTiming(incoming.timing);
+  if (!timingDirty && !timingSaving) { resetTimingDraft(); paintTiming(); }
   sourceState.bottomBar ||= { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {} };
   const state = modeState(incoming, editMode);
   lastState = state;
@@ -489,15 +687,17 @@ function render(incoming) {
   const justRevealed = revealed && lastPhase !== "revealed";
   lastPhase = state.phase;
 
-  statusEl.textContent = revealed
-    ? "ขึ้นจอแล้ว · " + (incoming.displayMode === "bottomBar" ? "BOTTOM BAR" : "SCOREBOARD")
-    : `ส่งแล้ว ${state.voted}/${state.total} · ยังไม่ขึ้นจอ`;
+  updateAirStatus({ status: statusEl, round: roundStatus, warning: airWarning }, incoming, editMode);
 
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
 
-  const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " — " + p.school]);
-  if (editMode === "bottomBar") choices.push(["logo", "โลโก้กลาง"], ["cover", "Cover PNG"]);
+  const choices = state.presidents.map((p) => ["card:" + p.id, p.name + " · " + p.school]);
+  if (editMode === "bottomBar")
+    choices.push(["logo", "โลโก้กลาง"], ["count:red", "จำนวนธงแดง"],
+      ["count:green", "จำนวนธงเขียว"], ["cover", "Cover PNG"]);
+  else
+    choices.push(["heading", "ข้อความหัวเรื่อง"]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
     selection.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));
@@ -517,14 +717,18 @@ function render(incoming) {
   apply();
 }
 
-document.getElementById("editMode").onchange = event => {
+// Tabs only choose which tools are in view; nothing here touches the board.
+const sideTabs = createTabs(document.querySelector(".side-panel [role=tablist]"), { fallback: "position", onShow: () => resetAllConfirm.disarm() });
+// Arranging the card grid is a Show Status job, so its tab rests in BOTTOM BAR.
+document.getElementById("editMode").addEventListener("change", event => {
+  if (event.target.name !== "editMode") return;
+  resetAllConfirm.disarm();
   endDrag(); commitDraft(); gridDrafts = null;
   editMode = event.target.value; selected = "";
-  document.querySelector(".grid-tools").hidden = editMode === "bottomBar";
-  document.getElementById("gridApply").disabled = true;
-  document.getElementById("gridCancel").disabled = true;
+  sideTabs.setDisabled("grid", editMode === "bottomBar", "ใช้ได้เฉพาะ Show Status");
+  showGridPreview(null);
   if (sourceState) render(sourceState);
-};
+});
 for (const [id, key] of [["imageOpacity", "imageOpacity"], ["resultOpacity", "resultOpacity"], ["pieceWidth", "scaleX"], ["pieceHeight", "scaleY"]]) {
   document.getElementById(id).onchange = event => {
     const value = event.target.valueAsNumber;
@@ -533,15 +737,130 @@ for (const [id, key] of [["imageOpacity", "imageOpacity"], ["resultOpacity", "re
     commitDraft();
   };
 }
+// ---- timing panel ---------------------------------------------------------
+// Animation lengths belong to the session, so this panel drafts them the way
+// the template panel drafts a box: nothing reaches the stream until the
+// operator presses the apply button.
+const TIMING_GROUPS = [
+  ["scoreboard", "Show Status"],
+  ["bottomBar", "BOTTOM BAR"],
+  ["board", "การ์ดและตัวเลข"],
+  ["monitor", "จอมอนิเตอร์"],
+  ["phone", "หน้าโหวตในมือถือ"]
+];
+const TIMING_LABELS = {
+  scoreboard: { card: "การ์ดเข้า", stagger: "หน่งระหว่างการ์ด",
+    maxStagger: "หน่งรวมสูงสุด", exit: "การ์ดออก",
+    exitStagger: "หน่งตอนออก", maxExitStagger: "หน่งออกรวมสูงสุด" },
+  bottomBar: { logo: "โลโก้กลาง", cover: "Cover", card: "การ์ด",
+    firstPair: "หน่งคู่แรก", pair: "หน่งระหว่างคู่",
+    maxStagger: "หน่งรวมสูงสุด", exit: "ออก" },
+  board: { reveal: "เด้งตอนเปลี่ยนสถานะ", countRoll: "ตัวเลขหมุน",
+    countTick: "ช่วงเปลี่ยนหลัก", slotFrame: "กรอบช่องว่าง" },
+  monitor: { guide: "เส้นไกด์", control: "ปุ่มและช่องเลือก", confirm: "ยืนยันซ้ำ" },
+  phone: { flag: "ปุ่มธง" }
+};
+const timingInputs = new Map();
+let timingDraft = null, timingDirty = false, timingSaving = false;
+const timingStatus = document.getElementById("timingStatus");
+const cloneTiming = value => JSON.parse(JSON.stringify(value));
+
+function buildTimingFields() {
+  document.getElementById("timingFields").replaceChildren(...TIMING_GROUPS.map(([group, title]) => {
+    const section = document.createElement("div");
+    section.className = "timing-group";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const fields = document.createElement("div");
+    fields.className = "template-fields";
+    for (const key of Object.keys(FFF_TIMING_DEFAULTS[group])) {
+      const [min, max] = FFF_TIMING_LIMITS.limitFor(key);
+      const input = document.createElement("input");
+      input.type = "number"; input.min = String(min); input.max = String(max); input.step = "10";
+      input.id = "timing-" + group + "-" + key;
+      input.onchange = () => {
+        const value = input.valueAsNumber;
+        if (timingSaving || !Number.isFinite(value)) { input.value = timingDraft[group][key]; return; }
+        timingDraft[group][key] = Math.min(max, Math.max(min, Math.round(value)));
+        input.value = timingDraft[group][key];
+        timingChanged();
+      };
+      const label = document.createElement("label");
+      label.append(TIMING_LABELS[group][key] + " ", input);
+      fields.appendChild(label);
+      timingInputs.set(group + "." + key, input);
+    }
+    section.append(heading, fields);
+    return section;
+  }));
+}
+function paintTiming() {
+  if (!timingDraft) return;
+  for (const [name, input] of timingInputs) {
+    const [group, key] = name.split(".");
+    if (document.activeElement !== input) input.value = timingDraft[group][key];
+    input.disabled = timingSaving;
+  }
+  document.getElementById("timingApply").disabled = !timingDirty || timingSaving;
+  document.getElementById("timingCancel").disabled = !timingDirty || timingSaving;
+  document.getElementById("timingDefaults").disabled = timingSaving;
+}
+function timingChanged() {
+  timingDirty = true;
+  timingStatus.textContent = "ร่างจังหวะยังไม่ถูกใช้";
+  paintTiming();
+}
+// The session's own values, merged over the defaults, are what the panel edits.
+function resetTimingDraft() { timingDraft = cloneTiming(fffTiming); }
+document.getElementById("timingApply").onclick = async () => {
+  if (timingSaving || !timingDirty) return;
+  const submitted = cloneTiming(timingDraft);
+  timingSaving = true; paintTiming();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/timing", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submitted), signal: controller.signal });
+    if (!response.ok) throw new Error("save failed");
+    timingDirty = false;
+    timingStatus.textContent = "ใช้จังหวะแล้ว";
+  } catch (error) {
+    timingDirty = false; resetTimingDraft();
+    timingStatus.textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว";
+  } finally { clearTimeout(timer); timingSaving = false; paintTiming(); }
+};
+document.getElementById("timingCancel").onclick = () => {
+  if (timingSaving) return;
+  timingDirty = false; resetTimingDraft(); timingStatus.textContent = ""; paintTiming();
+};
+document.getElementById("timingDefaults").onclick = () => {
+  if (timingSaving) return;
+  timingDraft = cloneTiming(FFF_TIMING_DEFAULTS);
+  timingChanged();
+};
+buildTimingFields();
+resetTimingDraft();
+paintTiming();
+
 fitCanvas();
-setInterval(flush, 3000);
+setInterval(flush, SAVE_RETRY_MS);
 document.fonts.ready.then(apply);
+// A card PNG that lands late resizes its slot, so the measured geometry has to
+// be taken again once — coalesced, not once per image. The overlay keeps the
+// same listener; without it the preview measures boxes that have since grown.
+let relayout = 0;
+canvas.addEventListener("load", () => {
+  if (relayout) return;
+  relayout = requestAnimationFrame(() => { relayout = 0; apply(); });
+}, true);
 
 const stream = new EventSource("/api/events/overlay");
-stream.onopen = () => warn.classList.add("hidden");
-stream.onerror = () => warn.classList.remove("hidden");
+stream.onopen = () => { warn.classList.add("hidden"); accessDenied.classList.add("hidden"); };
+stream.onerror = () => { warn.classList.remove("hidden"); checkAccess({ warn: warn, denied: accessDenied }); };
 stream.onmessage = (event) => {
   warn.classList.add("hidden");
+  accessDenied.classList.add("hidden");
   render(JSON.parse(event.data));
 };
 </script>

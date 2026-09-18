@@ -2,92 +2,367 @@
 <html lang="th">
 <head>
 <meta charset="utf-8" />
-<title>FFF Flag Board — Overlay</title>
+<title>FFF Flag Board · Overlay</title>
 <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="overlay">
 
-<div id="wrap" class="board-wrap" hidden>
-  <div id="board" class="board"></div>
+<!-- One board per display mode. Both are built and measured while the stream is
+     still clean, so the press that switches modes never has to rebuild one. -->
+<div id="stage">
+  <div id="wrap-scoreboard" class="board-wrap" hidden><div id="board-scoreboard" class="board"></div></div>
+  <div id="wrap-bottomBar" class="board-wrap" hidden><div id="board-bottomBar" class="board"></div></div>
 </div>
 
+<script src="/timing.js"></script>
 <script src="/board.js"></script>
 <script>
-const wrap = document.getElementById("wrap");
-const board = document.getElementById("board");
-let lastPhase = null;
+const stage = document.getElementById("stage");
+const MODES = ["scoreboard", "bottomBar"];
+const views = Object.fromEntries(MODES.map(mode => [mode, {
+  wrap: document.getElementById("wrap-" + mode), board: document.getElementById("board-" + mode),
+  preparedKey: null
+}]));
+// The pair the operator is looking at, or was looking at last. Everything that
+// animates or measures on air reads these, so the rest of the file is unchanged
+// by there being two boards.
+let wrap = views.scoreboard.wrap;
+let board = views.scoreboard.board;
 let lastState = null;
 let displayedMode = null;
 let displayedRound = null;
 let transition = null;
 let motionGeneration = 0;
+let relayout = 0;
+
+// The lengths come from /timing.js, so the operator can change them from the
+// monitor and the next entrance uses them. The shape of the motion — easing,
+// offsets, the order pieces move in — is the design and stays here.
+const ENTRANCE_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+const bottomTiming = () => ({ ...fffTiming.bottomBar, easing: ENTRANCE_EASING });
+const scoreboardTiming = () => ({ ...fffTiming.scoreboard, easing: ENTRANCE_EASING });
+
+// The operator's press must never be the first time the browser hears about a
+// PNG. Every asset in the feed is fetched the moment the state arrives, and the
+// mode that is about to go on air is decoded as well, so the reveal frame has
+// no network and no decode left to do.
+const warmed = new Map();
+function warmAssets(state) {
+  const bottom = (state.displayMode || "scoreboard") === "bottomBar";
+  const logoId = state.bottomBar && state.bottomBar.logoPresidentId;
+  const wanted = new Map();
+  const want = (url, eager) => { if (url) wanted.set(url, wanted.get(url) || eager); };
+  for (const president of state.presidents || []) {
+    want(president.cardUrl, !bottom);
+    want(president.bottomBarUrl, bottom);
+    want(president.logoUrl, bottom && president.id === logoId);
+    // The other round of the centre logo is fetched too, so switching rounds
+    // on air never waits on the network.
+    want(president.logoRound1Url, false);
+    want(president.logoRound2Url, false);
+  }
+  want(state.bottomBar && state.bottomBar.coverUrl, bottom);
+
+  for (const [url, eager] of wanted) {
+    let image = warmed.get(url);
+    if (!image) {
+      image = new Image();
+      image.decoding = "async";
+      if (eager) image.fetchPriority = "high";
+      warmed.set(url, image);
+      image.src = url;
+    }
+    // Decoding costs memory, so only the mode on deck pays for it; the other
+    // mode still opens without a round trip because the bytes are cached.
+    if (eager && !image._decoding) {
+      image._decoding = true;
+      image.decode().catch(() => { image._decoding = false; });
+    }
+  }
+  for (const url of [...warmed.keys()]) if (!wanted.has(url)) warmed.delete(url);
+}
+
+// Measure in the presentation's local coordinates, including template overflow
+// and independently scaled results. Saved transforms stay on the outer piece.
+function revealBounds(element) {
+  const origin = element.getBoundingClientRect();
+  const scaleX = origin.width / element.offsetWidth || 1;
+  const scaleY = origin.height / element.offsetHeight || 1;
+  const bounds = { left: 0, top: 0, right: element.offsetWidth, bottom: element.offsetHeight,
+    width: element.offsetWidth, height: element.offsetHeight };
+  for (const child of element.querySelectorAll(".card-image, .result")) {
+    if (child.hidden || getComputedStyle(child).display === "none") continue;
+    const box = child.getBoundingClientRect();
+    bounds.left = Math.min(bounds.left, (box.left - origin.left) / scaleX);
+    bounds.top = Math.min(bounds.top, (box.top - origin.top) / scaleY);
+    bounds.right = Math.max(bounds.right, (box.right - origin.left) / scaleX);
+    bounds.bottom = Math.max(bounds.bottom, (box.bottom - origin.top) / scaleY);
+  }
+  return bounds;
+}
+
+// Reveal extents are measured for every animating card at once and only written
+// back where they moved: re-keyframing an animation drops it off the compositor,
+// and votes keep arriving while the entrance is still running.
+function refreshReveals() {
+  const elements = [];
+  for (const element of board.querySelectorAll(".bottom-motion"))
+    if (element._measureReveal) elements.push(element);
+  if (!elements.length) return;
+  const measures = elements.map(element => element._measureReveal());
+  elements.forEach((element, index) => element._applyReveal(measures[index]));
+}
 
 function animateBottom(entering, done = () => {}) {
+  // Taken once, so every piece of one entrance shares the same lengths.
+  const BOTTOM_TIMING = bottomTiming();
   const elements = [...board.querySelectorAll(".bottom-motion")];
+  // Read before cancelling: an exit can interrupt any point of the entrance.
   const current = elements.map(element => {
-    const style = getComputedStyle(element);
-    return { opacity: style.opacity, transform: style.transform };
+    const style = getComputedStyle(element), wipe = element.querySelector(".bottom-wipe");
+    const frozenWipe = wipe?.cloneNode();
+    if (frozenWipe) frozenWipe.style.transform = getComputedStyle(wipe).transform;
+    return { opacity: style.opacity, transform: style.transform, clipPath: style.clipPath, frozenWipe };
   });
   if (transition) {
     clearTimeout(transition.timer);
-    for (const animation of transition.motions) animation.cancel();
+    for (const cleanup of transition.cleanups) cleanup();
   }
-  const active = { generation: ++motionGeneration, entering, motions: [], timer: null };
+  const active = { generation: ++motionGeneration, entering, motions: [], cleanups: [], timer: null };
   transition = active;
   const finish = () => {
     if (transition !== active || active.generation !== motionGeneration) return;
     clearTimeout(active.timer);
     transition = null;
-    for (const animation of active.motions) animation.cancel();
+    for (const cleanup of active.cleanups) cleanup();
     done();
   };
-  active.motions = elements.map((element, index) => {
-    const hidden = { opacity: 0, transform: element.closest(".bottom-cover") ? "none" : "translateY(270px)" };
-    const shown = { opacity: 1, transform: "none" };
-    return element.animate([entering ? hidden : current[index], entering ? shown : hidden],
-      { duration: entering ? 300 : 200, easing: entering ? "cubic-bezier(0.16, 1, 0.3, 1)" : "ease-in", fill: "both" });
+  let deadline = 0;
+  for (const [index, element] of elements.entries()) {
+    const piece = element.closest(".piece"), card = piece.dataset.target.startsWith("card:");
+    const cover = piece.dataset.target === "cover";
+    const duration = entering ? (card ? BOTTOM_TIMING.card : cover ? BOTTOM_TIMING.cover : BOTTOM_TIMING.logo) : BOTTOM_TIMING.exit;
+    const delay = entering && card ? BOTTOM_TIMING.firstPair + Math.min(BOTTOM_TIMING.maxStagger,
+      Number(piece.dataset.revealPair) * BOTTOM_TIMING.pair) : 0;
+    deadline = Math.max(deadline, duration + delay);
+    const options = { duration, delay, easing: entering ? BOTTOM_TIMING.easing : "ease-in", fill: "both" };
+    const motions = [];
+    let wipe, cleaned = false;
+    element.classList.add("is-animating");
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const animation of motions) animation.cancel();
+      wipe?.remove();
+      element.classList.remove("is-animating");
+      element._measureReveal = null;
+      element._applyReveal = null;
+      element._revealKey = null;
+      element._cancelPresentation = null;
+    };
+    element._cancelPresentation = cleanup;
+    active.cleanups.push(cleanup);
+    if (entering && card) {
+      wipe = document.createElement("div"); wipe.className = "bottom-wipe";
+      wipe.setAttribute("aria-hidden", "true"); element.appendChild(wipe);
+      const motion = element.animate([], options), sweep = wipe.animate([], options);
+      motions.push(motion, sweep);
+      element._measureReveal = () => {
+        const box = revealBounds(element);
+        const result = element.querySelector(".result"), style = getComputedStyle(result);
+        return { box, hidden: style.display === "none",
+          color: style.backgroundColor, opacity: style.opacity };
+      };
+      element._applyReveal = (measure) => {
+        const box = measure.box;
+        const key = [box.left, box.top, box.right, box.bottom, box.width, box.height,
+          measure.hidden, measure.color, measure.opacity].join("|");
+        if (element._revealKey === key) return;
+        element._revealKey = key;
+        const inset = top => `inset(${top}px ${box.width - box.right}px ${box.height - box.bottom}px ${box.left}px)`;
+        motion.effect.setKeyframes([
+          { opacity: 0, transform: "translateY(18px)", clipPath: inset(box.bottom) },
+          { opacity: 1, transform: "translateY(0px)", clipPath: inset(box.top) }
+        ]);
+        wipe.hidden = measure.hidden;
+        Object.assign(wipe.style, { left: box.left + "px", width: (box.right - box.left) + "px",
+          backgroundColor: measure.color, opacity: measure.opacity });
+        sweep.effect.setKeyframes([
+          { transform: `translateY(${box.bottom}px)` },
+          { transform: `translateY(${box.top}px)` }
+        ]);
+      };
+    } else {
+      const start = entering ? { opacity: 0, transform: cover ? "none" : "translateY(12px)" } :
+        { opacity: current[index].opacity, transform: current[index].transform, clipPath: current[index].clipPath };
+      const end = entering ? { opacity: 1, transform: "none" } :
+        { opacity: 0, transform: card ? new DOMMatrix(current[index].transform).translate(0, 12).toString() : current[index].transform,
+          clipPath: current[index].clipPath };
+      if (!entering && current[index].frozenWipe) {
+        wipe = current[index].frozenWipe; element.appendChild(wipe);
+      }
+      motions.push(element.animate([start, end], options));
+    }
+    active.motions.push(...motions);
+    // Each piece owns its cleanup. Removing one card cannot settle the others.
+    Promise.all(motions.map(animation => animation.finished.catch(() => {}))).then(cleanup);
+  }
+  // Still the same task as the empty keyframes above, so nothing paints between.
+  refreshReveals();
+  Promise.all(active.motions.map(animation => animation.finished.catch(() => {}))).then(finish);
+  // Use the actual delayed end, with the same generation-guarded completion.
+  active.timer = setTimeout(finish, deadline);
+}
+
+// Show Status cards slide in from the left one after another and leave to the
+// right in the same order. Only transform and opacity move, so the compositor
+// runs every frame; the saved placement stays on the outer piece.
+function animateScoreboard(entering, done = () => {}) {
+  const SCOREBOARD_TIMING = scoreboardTiming();
+  const pieces = [...board.querySelectorAll(":scope > .piece")];
+  const slots = pieces.map(piece => piece.firstElementChild);
+  // board.js tags every card for its pop when the board is first built off
+  // air. This entrance replaces that pop, so only a status change made on air
+  // afterwards replays a single card.
+  if (entering) for (const slot of slots) slot.classList.remove("reveal-in");
+  // Read before cancelling: an exit can interrupt any point of the entrance.
+  const current = slots.map(slot => {
+    const style = getComputedStyle(slot);
+    return { opacity: style.opacity, transform: style.transform };
   });
-  Promise.all(active.motions.map(animation => animation.finished)).then(finish).catch(() => {});
-  // Background tabs may delay animation promises; the same guarded completion
-  // owns the deadline and is cancelled when another transition replaces it.
-  active.timer = setTimeout(finish, entering ? 300 : 200);
+  if (transition) {
+    clearTimeout(transition.timer);
+    for (const cleanup of transition.cleanups) cleanup();
+  }
+  const active = { generation: ++motionGeneration, entering, motions: [], cleanups: [], timer: null };
+  transition = active;
+  const finish = () => {
+    if (transition !== active || active.generation !== motionGeneration) return;
+    clearTimeout(active.timer);
+    transition = null;
+    for (const cleanup of active.cleanups) cleanup();
+    done();
+  };
+  // The title is the board's furniture, not one of its rows: it enters with the
+  // first card instead of taking a place in the stagger, so adding it left
+  // every card's timing exactly where it was.
+  const rows = pieces.filter(piece => piece.dataset.target !== "heading").length;
+  // Spacing shrinks for a long roster so the whole sequence keeps its length.
+  const spacing = (step, max) => rows > 1 ? Math.min(step, max / (rows - 1)) : 0;
+  const step = entering ? spacing(SCOREBOARD_TIMING.stagger, SCOREBOARD_TIMING.maxStagger)
+    : spacing(SCOREBOARD_TIMING.exitStagger, SCOREBOARD_TIMING.maxExitStagger);
+  const duration = entering ? SCOREBOARD_TIMING.card : SCOREBOARD_TIMING.exit;
+  let deadline = 0;
+  let row = 0;
+  slots.forEach((slot, index) => {
+    const piece = pieces[index];
+    const delay = piece.dataset.target === "heading" ? 0 : row++ * step;
+    deadline = Math.max(deadline, delay + duration);
+    const frames = entering
+      ? [{ opacity: 0, transform: "translateX(-48px)" }, { opacity: 1, transform: "none" }]
+      : [{ opacity: current[index].opacity, transform: current[index].transform },
+         { opacity: 0, transform: "translateX(48px)" }];
+    piece.classList.add("is-animating");
+    const motion = slot.animate(frames, { duration, delay, fill: "both",
+      easing: entering ? SCOREBOARD_TIMING.easing : "ease-in" });
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      motion.cancel();
+      piece.classList.remove("is-animating");
+    };
+    active.cleanups.push(cleanup);
+    active.motions.push(motion);
+    // A card that has entered can rest on its own. A card that has left stays
+    // gone until the whole board hides, or it would flash back on air.
+    if (entering) motion.finished.catch(() => {}).then(cleanup);
+  });
+  Promise.all(active.motions.map(animation => animation.finished.catch(() => {}))).then(finish);
+  active.timer = setTimeout(finish, deadline);
+}
+
+// Geometry only has to be recomputed when something that can move a piece
+// changed. A vote changes colours, not boxes.
+function layoutKey(view, mode) {
+  return JSON.stringify([mode, view.layout, view.pieces, view.layers, view.cardTemplate,
+    view.headingTemplate, view.logoTemplate, view.countTemplate, view.coverUrl,
+    (view.presidents || []).map(p => [p.id, p.cardUrl, p.bottomBarUrl, p.logoUrl])]);
+}
+
+// Everything expensive happens here, and it runs while the board is still
+// blank: the DOM exists, the PNGs are attached and decoded, and the saved
+// geometry is already measured before the operator presses anything.
+function prepare(state, mode) {
+  const view = modeState(state, mode);
+  const target = views[mode];
+  // The overlay plays its own entrances (animateScoreboard, animateBottom);
+  // board.js only replays a single card whose status changes on air.
+  renderBoard(target.board, view, { revealed: true, showVotes: true, justRevealed: false });
+  const key = layoutKey(view, mode);
+  if (key !== target.preparedKey) {
+    target.preparedKey = key;
+    applyPieceLayouts(target.wrap, view);
+  }
 }
 
 function render(state) {
   lastState = state;
+  applyTiming(state.timing);
+  warmAssets(state);
   const revealed = state.phase === "revealed";
   const mode = state.displayMode || "scoreboard";
   // Freeze the outgoing round. Every incoming command updates lastState, and
   // the one completion below renders that latest state after the exit.
   if (transition && !transition.entering) return;
-  if (displayedMode === "bottomBar" && !wrap.hidden &&
-      (!revealed || mode !== "bottomBar" || displayedRound !== state.round)) {
-    animateBottom(false, () => {
+  if (displayedMode && !wrap.hidden &&
+      (!revealed || mode !== displayedMode || displayedRound !== state.round)) {
+    const leave = displayedMode === "bottomBar" ? animateBottom : animateScoreboard;
+    leave(false, () => {
       wrap.hidden = true;
+      resetCountRolls(board);
       displayedMode = null;
       render(lastState);
     });
     return;
   }
 
-  const justRevealed = revealed && lastPhase !== "revealed";
-  lastPhase = state.phase;
+  const enteringBottom = revealed && mode === "bottomBar" && displayedMode !== "bottomBar";
+  const enteringScoreboard = revealed && mode === "scoreboard" && displayedMode !== "scoreboard";
+  wrap = views[mode].wrap;
+  board = views[mode].board;
+  prepare(state, mode);
+  // Off air there is nothing to disturb, so the mode that is not showing is
+  // brought up to date too. That is the whole reason a mode change can go on
+  // air in one frame without rebuilding anything.
+  if (!revealed) for (const other of MODES) if (other !== mode) prepare(state, other);
+  refreshReveals();
+  // Only the mode on deck is kept painted; see the stylesheet.
+  for (const name of MODES) views[name].wrap.classList.toggle("on-deck", name === mode);
   if (!revealed) {
-    wrap.hidden = true; displayedMode = null;
+    for (const name of MODES) views[name].wrap.hidden = true;
+    resetCountRolls(board); displayedMode = null;
     return;
   }
-  const enteringBottom = mode === "bottomBar" && displayedMode !== "bottomBar";
-  wrap.hidden = false;
+  for (const name of MODES) views[name].wrap.hidden = name !== mode;
   displayedMode = mode; displayedRound = state.round;
-  const view = modeState(state, mode);
-  renderBoard(board, view, { revealed: true, showVotes: true, justRevealed });
-  applyPieceLayouts(wrap, view);
   if (enteringBottom) animateBottom(true);
+  if (enteringScoreboard) animateScoreboard(true);
 }
 
+// A card PNG that still lands late resizes its slot, so the measured geometry
+// has to be taken again once — coalesced, not once per image.
+stage.addEventListener("load", () => {
+  if (relayout) return;
+  relayout = requestAnimationFrame(() => {
+    relayout = 0;
+    for (const name of MODES) views[name].preparedKey = null;
+    if (lastState) render(lastState);
+  });
+}, true);
+
 const stream = new EventSource("/api/events/overlay");
-stream.onmessage = (event) => { lastState = JSON.parse(event.data); render(lastState); };
-document.fonts.ready.then(() => { if (lastState) render(lastState); });
+stream.onmessage = (event) => { render(JSON.parse(event.data)); };
 </script>
 </body>
 </html>
