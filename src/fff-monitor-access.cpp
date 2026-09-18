@@ -68,7 +68,8 @@ Endpoint classify(const QByteArray &method, const QString &path)
 		static const QStringList monitorWrites = {
 			QStringLiteral("/api/layout"),        QStringLiteral("/api/layer"),
 			QStringLiteral("/api/operator/vote"), QStringLiteral("/api/status"),
-			QStringLiteral("/api/asset"),         QStringLiteral("/api/template")};
+			QStringLiteral("/api/asset"),         QStringLiteral("/api/template"),
+			QStringLiteral("/api/timing")};
 		if (monitorWrites.contains(path))
 			return Endpoint::MonitorApi;
 		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))

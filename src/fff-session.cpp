@@ -115,6 +115,149 @@ bool FffSession::validCountTemplate(const QJsonObject &value)
 	return size.isDouble() && std::isfinite(size.toDouble()) && size.toDouble() >= 24 && size.toDouble() <= 400;
 }
 
+// The title above the Show Status stack. It is the one piece on that board made
+// of words rather than artwork, so it carries its own type the way the flag
+// counters do: the stylesheet may not pin a family, a weight or a colour, or
+// the panel and the stream would disagree about what is on air.
+bool FffSession::validHeadingTemplate(const QJsonObject &value)
+{
+	if (!validTemplateBox(value.value(QStringLiteral("box")).toObject()))
+		return false;
+	const auto text = value.value(QStringLiteral("text"));
+	if (!text.isString())
+		return false;
+	const QString body = text.toString();
+	if (body.size() > 200)
+		return false;
+	// Newlines are the whole point of a two-line title; every other control
+	// character is not something an operator can have meant to type.
+	int lines = 1;
+	for (const QChar character : body) {
+		if (character == QLatin1Char('\n')) {
+			++lines;
+			continue;
+		}
+		if (character.unicode() < 0x20)
+			return false;
+	}
+	if (lines > 8)
+		return false;
+	const auto family = value.value(QStringLiteral("fontFamily"));
+	if (!family.isString() || !validFontFamily(family.toString()))
+		return false;
+	const auto weight = value.value(QStringLiteral("fontWeight"));
+	if (!weight.isDouble() || !std::isfinite(weight.toDouble()) || weight.toDouble() < 100 ||
+	    weight.toDouble() > 900)
+		return false;
+	for (const QString &key : {QStringLiteral("fontSize"), QStringLiteral("lineHeight")}) {
+		const auto number = value.value(key);
+		if (!number.isDouble() || !std::isfinite(number.toDouble()) || number.toDouble() < 8 ||
+		    number.toDouble() > 400)
+			return false;
+	}
+	if (!validHexColor(value.value(QStringLiteral("color")).toString()))
+		return false;
+	const QString align = value.value(QStringLiteral("align")).toString();
+	return align == QLatin1String("left") || align == QLatin1String("center") || align == QLatin1String("right");
+}
+
+bool FffSession::setHeadingTemplate(const QJsonObject &value)
+{
+	if (!validHeadingTemplate(value))
+		return false;
+	const auto previous = m_headingTemplate;
+	m_headingTemplate = value;
+	if (!save()) {
+		m_headingTemplate = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+// How long each animation runs. The web pages own the defaults and the shapes
+// of the motion; this is only the lengths, so anything left out here keeps the
+// page's default rather than becoming zero. Groups and keys are named exactly
+// so a value can never be filed under a motion it does not belong to.
+namespace {
+struct TimingKey {
+	const char *group;
+	const char *key;
+	double min;
+	double max;
+};
+
+// Mirrors FFF_TIMING_DEFAULTS in data/web/timing.js; the two must agree or the
+// panel offers a number the plugin then refuses.
+const TimingKey kTimingKeys[] = {
+	{"scoreboard", "card", 0, 5000},
+	{"scoreboard", "stagger", 0, 5000},
+	{"scoreboard", "maxStagger", 0, 5000},
+	{"scoreboard", "exit", 0, 5000},
+	{"scoreboard", "exitStagger", 0, 5000},
+	{"scoreboard", "maxExitStagger", 0, 5000},
+	{"bottomBar", "logo", 0, 5000},
+	{"bottomBar", "cover", 0, 5000},
+	{"bottomBar", "card", 0, 5000},
+	{"bottomBar", "firstPair", 0, 5000},
+	{"bottomBar", "pair", 0, 5000},
+	{"bottomBar", "maxStagger", 0, 5000},
+	{"bottomBar", "exit", 0, 5000},
+	{"board", "reveal", 0, 5000},
+	{"board", "countRoll", 0, 5000},
+	{"board", "countTick", 10, 500},
+	{"board", "slotFrame", 0, 5000},
+	{"monitor", "guide", 0, 5000},
+	{"monitor", "control", 0, 5000},
+	{"monitor", "confirm", 500, 30000},
+	{"phone", "flag", 0, 5000},
+};
+
+const TimingKey *findTimingKey(const QString &group, const QString &key)
+{
+	for (const TimingKey &known : kTimingKeys) {
+		if (group == QLatin1String(known.group) && key == QLatin1String(known.key))
+			return &known;
+	}
+	return nullptr;
+}
+} // namespace
+
+bool FffSession::validTiming(const QJsonObject &value)
+{
+	for (auto group = value.begin(); group != value.end(); ++group) {
+		if (!group.value().isObject())
+			return false;
+		const QJsonObject values = group.value().toObject();
+		for (auto entry = values.begin(); entry != values.end(); ++entry) {
+			const TimingKey *known = findTimingKey(group.key(), entry.key());
+			if (!known)
+				return false;
+			const QJsonValue number = entry.value();
+			if (!number.isDouble() || !std::isfinite(number.toDouble()))
+				return false;
+			const double ms = number.toDouble();
+			if (ms < known->min || ms > known->max)
+				return false;
+		}
+	}
+	return true;
+}
+
+bool FffSession::setTiming(const QJsonObject &value)
+{
+	if (!validTiming(value))
+		return false;
+	const auto previous = m_timing;
+	m_timing = value;
+	if (!save()) {
+		m_timing = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
 bool FffSession::setCardTemplate(const QJsonObject &value, const QString &mode)
 {
 	if (!validMode(mode))
@@ -835,6 +978,13 @@ void FffSession::load()
 	const QJsonObject root = document.object();
 	const auto cardTemplate = root.value(QStringLiteral("cardTemplate")).toObject();
 	m_cardTemplate = validCardTemplate(cardTemplate) ? cardTemplate : QJsonObject();
+	// A session written before the timing panel existed simply has none, which
+	// is the same as every animation keeping its default length.
+	const auto timing = root.value(QStringLiteral("timing")).toObject();
+	m_timing = validTiming(timing) ? timing : QJsonObject();
+	// A session saved before the title existed draws the artwork's own.
+	const auto headingTemplate = root.value(QStringLiteral("headingTemplate")).toObject();
+	m_headingTemplate = validHeadingTemplate(headingTemplate) ? headingTemplate : QJsonObject();
 
 	m_presidents.clear();
 	const QJsonArray presidents = root.value(QStringLiteral("presidents")).toArray();
@@ -1001,6 +1151,10 @@ bool FffSession::save() const
 	root.insert(QStringLiteral("displayMode"), m_displayMode);
 	root.insert(QStringLiteral("bottomBar"), bottomBarJson());
 	root.insert(QStringLiteral("version"), 5);
+	if (!m_timing.isEmpty())
+		root.insert(QStringLiteral("timing"), m_timing);
+	if (!m_headingTemplate.isEmpty())
+		root.insert(QStringLiteral("headingTemplate"), m_headingTemplate);
 	if (!m_cardTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
@@ -1092,8 +1246,16 @@ QByteArray FffSession::overlayStateJson() const
 	root.insert(QStringLiteral("presidents"), presidents);
 
 	QJsonObject layout;
+	// Lengths are not per mode — the object names every family of motion — so
+	// this rides the state once, outside the mode's own section.
+	if (!m_timing.isEmpty())
+		root.insert(QStringLiteral("timing"), m_timing);
 	if (!m_cardTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
+	// The title belongs to Show Status, so it rides beside cardTemplate rather
+	// than inside the bottom bar's own section.
+	if (!m_headingTemplate.isEmpty())
+		root.insert(QStringLiteral("headingTemplate"), m_headingTemplate);
 	layout.insert(QStringLiteral("x"), m_layout.x);
 	layout.insert(QStringLiteral("y"), m_layout.y);
 	layout.insert(QStringLiteral("scale"), m_layout.scale);
@@ -1131,6 +1293,11 @@ QByteArray FffSession::phoneStateJson(const QString &presidentId) const
 	root.insert(QStringLiteral("round"), m_round);
 	root.insert(QStringLiteral("total"), m_presidents.size());
 	root.insert(QStringLiteral("voted"), votedCount());
+	// The flag buttons animate, so the phone needs the lengths too. It is the
+	// only part of the session it gets beyond its own president: placements,
+	// templates and the roster all stay with the operator.
+	if (!m_timing.isEmpty())
+		root.insert(QStringLiteral("timing"), m_timing);
 
 	// Only ever the caller's own president: nobody on a phone gets to peek
 	// at the other flags before the reveal.

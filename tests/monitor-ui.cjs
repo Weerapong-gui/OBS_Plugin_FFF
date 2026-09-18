@@ -18,6 +18,8 @@ const state = {
 };
 let accessStatus = 204;
 let layoutRequests = [];
+let timingRequests = [];
+let timingStatusCode = 200;
 const streams = new Set();
 const push = () => { for (const res of streams) res.write(`data: ${JSON.stringify(state)}\n\n`); };
 
@@ -32,6 +34,16 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.url === "/api/monitor/access") { res.writeHead(accessStatus); res.end(); return; }
+  if (req.method === "POST" && req.url === "/api/timing") {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      timingRequests.push(JSON.parse(body));
+      res.writeHead(timingStatusCode, { "Content-Type": "application/json" });
+      res.end(timingStatusCode === 200 ? '{"ok":true}' : '{"error":"save failed"}');
+    });
+    return;
+  }
   if (req.method === "POST" && req.url === "/api/layout") {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
@@ -42,7 +54,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  const file = { "/monitor": "monitor.html", "/app.css": "app.css", "/board.js": "board.js",
+  const file = { "/monitor": "monitor.html", "/app.css": "app.css", "/board.js": "board.js", "/timing.js": "timing.js",
     "/template-editor.js": "template-editor.js", "/view-zoom.js": "view-zoom.js",
     "/monitor-ui.js": "monitor-ui.js" }[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
@@ -72,7 +84,8 @@ async function main() {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.setViewport({ width: 1440, height: 900 });
     await page.goto(base + "/monitor");
-    const loaded = () => page.waitForFunction(() => document.querySelectorAll("#board .piece").length === 3);
+    const loaded = () => page.waitForFunction(() =>
+      document.querySelectorAll('#board .piece[data-target^="card:"]').length === 3);
     await loaded();
 
     // Card controls stay in place and say why they are unavailable.
@@ -156,6 +169,81 @@ async function main() {
     await page.click("#tab-position");
     assert.equal(await page.$eval("#resetAll", (el) => el.textContent), "รีเซ็ตทั้งหมด", "changing tab disarms");
 
+    // A row's place on the stack is fixed, so artwork taller than the pitch
+    // overlaps the row below it. The preview says so before the show does.
+    assert.equal(await page.$eval("#stackWarning", el => el.hidden), true,
+      "nothing to warn about while the roster has no artwork");
+    const tallPng = await page.evaluate(() => {
+      const canvasElement = document.createElement("canvas");
+      canvasElement.width = 346; canvasElement.height = 120;
+      canvasElement.getContext("2d").fillRect(0, 0, 346, 120);
+      return canvasElement.toDataURL("image/png");
+    });
+    state.presidents[1].cardUrl = tallPng;
+    state.presidents[1].statusUrl = tallPng;
+    push();
+    await page.waitForFunction(() => !document.getElementById("stackWarning").hidden);
+    const warned = await page.$eval("#stackWarning", el => el.textContent);
+    assert.ok(warned.includes("120px") && warned.includes(String(57)),
+      `the warning names the artwork and the pitch (${warned})`);
+    assert.ok(warned.includes("นายก 1"), "and which card it is");
+    await setEditMode(page, "bottomBar");
+    assert.equal(await page.$eval("#stackWarning", el => el.hidden), true,
+      "BOTTOM BAR places its own rows, so the warning is not its business");
+    await setEditMode(page, "scoreboard");
+    state.presidents[1].cardUrl = ""; state.presidents[1].statusUrl = ""; push();
+    await page.waitForFunction(() => document.getElementById("stackWarning").hidden);
+
+    // The timing panel: a field per length, drafted and applied like a template.
+    await page.click("#tab-timing");
+    assert.equal(await page.$eval("#panel-timing", (el) => el.hidden), false, "the timing tab opens");
+    const offered = await page.evaluate(() => Object.entries(FFF_TIMING_DEFAULTS).flatMap(([group, values]) =>
+      Object.keys(values).map(key => "timing-" + group + "-" + key)));
+    assert.deepEqual(await page.evaluate(ids => ids.filter(id => !document.getElementById(id)), offered), [],
+      "every length the page knows about has a field");
+    assert.equal(await page.$eval("#timing-scoreboard-card", (el) => el.value),
+      String(await page.evaluate(() => FFF_TIMING_DEFAULTS.scoreboard.card)),
+      "the fields open on the lengths in use");
+    assert.equal(await page.$eval("#timingApply", (el) => el.disabled), true, "nothing to apply before an edit");
+    timingRequests = [];
+    await page.$eval("#timing-scoreboard-card", (el) => { el.value = 900; el.dispatchEvent(new Event("change")); });
+    assert.equal(await page.$eval("#timingApply", (el) => el.disabled), false, "an edit arms the apply button");
+    assert.equal(await page.evaluate(() => fffTiming.scoreboard.card),
+      await page.evaluate(() => FFF_TIMING_DEFAULTS.scoreboard.card),
+      "a draft does not reach the board before it is applied");
+    await page.click("#timingApply");
+    await page.waitForFunction(() => !document.getElementById("timingStatus").textContent.includes("ยัง") &&
+      document.getElementById("timingStatus").textContent !== "");
+    assert.equal(timingRequests.length, 1, "applying sends one request");
+    assert.equal(timingRequests[0].scoreboard.card, 900, "the edited length is sent");
+    assert.equal(timingRequests[0].board.countRoll,
+      await page.evaluate(() => FFF_TIMING_DEFAULTS.board.countRoll), "and every other length rides with it");
+    // Out-of-range values are clamped to what the plugin will accept.
+    await page.$eval("#timing-board-countTick", (el) => { el.value = 1; el.dispatchEvent(new Event("change")); });
+    assert.equal(await page.$eval("#timing-board-countTick", (el) => el.value), "10", "a too-fast tick is clamped");
+    await page.click("#timingCancel");
+    assert.equal(await page.$eval("#timing-board-countTick", (el) => el.value),
+      String(await page.evaluate(() => FFF_TIMING_DEFAULTS.board.countTick)), "cancel restores the session's lengths");
+    // A refused save puts the panel back rather than leaving a phantom draft.
+    timingStatusCode = 500;
+    await page.$eval("#timing-scoreboard-exit", (el) => { el.value = 1000; el.dispatchEvent(new Event("change")); });
+    await page.click("#timingApply");
+    await page.waitForFunction(() => document.getElementById("timingStatus").textContent.includes("ไม่สำเร็จ"));
+    assert.equal(await page.$eval("#timing-scoreboard-exit", (el) => el.value),
+      String(await page.evaluate(() => FFF_TIMING_DEFAULTS.scoreboard.exit)), "a failed save rolls the panel back");
+    timingStatusCode = 200;
+    // The session's own lengths arrive over SSE and the panel follows them.
+    state.timing = { scoreboard: { card: 750 } }; push();
+    await page.waitForFunction(() => fffTiming.scoreboard.card === 750);
+    assert.equal(await page.$eval("#timing-scoreboard-card", (el) => el.value), "750",
+      "the panel follows what the session says");
+    await page.click("#timingDefaults");
+    assert.equal(await page.$eval("#timing-scoreboard-card", (el) => el.value),
+      String(await page.evaluate(() => FFF_TIMING_DEFAULTS.scoreboard.card)), "the defaults button restores them all");
+    await page.click("#timingCancel");
+    delete state.timing; push();
+    await page.click("#tab-position");
+
     // A revoked key is told apart from a dropped connection.
     accessStatus = 403;
     for (const res of streams) res.destroy();
@@ -165,6 +253,8 @@ async function main() {
 
     assert.deepEqual(errors, []);
     console.log("PASS: pinned tools, side tabs, card controls, on-air warning, two-step reset, revoked key");
+    console.log("PASS: the timing panel drafts, applies, clamps, rolls back and follows the session");
+    console.log("PASS: artwork that would overlap the row below it is called out in the preview");
   } finally {
     await browser.close();
     server.close();

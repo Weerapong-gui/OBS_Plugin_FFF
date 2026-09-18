@@ -110,9 +110,17 @@ public:
 	static bool validCardTemplate(const QJsonObject &value);
 	static bool validLogoTemplate(const QJsonObject &value);
 	static bool validCountTemplate(const QJsonObject &value);
+	// The title above the Show Status stack: its box, its words and its type.
+	static bool validHeadingTemplate(const QJsonObject &value);
+	bool setHeadingTemplate(const QJsonObject &value);
 	// A locally installed font family name, or empty for the page's own stack.
 	static bool validFontFamily(const QString &family);
 	static bool validHexColor(const QString &color);
+	// How long each animation runs, in milliseconds. Grouped by the family of
+	// motion it belongs to; the web pages carry the defaults, so anything this
+	// object leaves out simply keeps its default.
+	static bool validTiming(const QJsonObject &value);
+	bool setTiming(const QJsonObject &value);
 	bool setCardTemplate(const QJsonObject &value, const QString &mode = QStringLiteral("scoreboard"));
 	// "logo" or "count"; both exist only in Bottom Bar.
 	bool setBottomTemplate(const QString &piece, const QJsonObject &value);
@@ -202,4 +210,6 @@ private:
 	QHash<QString, FffLayout> m_pieceLayouts;
 	QHash<QString, int> m_pieceLayers;
 	QJsonObject m_cardTemplate;
+	QJsonObject m_headingTemplate;
+	QJsonObject m_timing;
 };

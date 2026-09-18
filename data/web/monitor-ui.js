@@ -65,7 +65,9 @@
   // may never appear inside an OBS custom dock.
   window.armConfirm = function (button, onConfirm, options) {
     const opts = options || {};
-    const timeoutMs = opts.timeoutMs || 3000;
+    // Read at the press rather than at set-up, so the length the timing panel
+    // publishes is the one the next press actually waits.
+    const armedFor = () => opts.timeoutMs || window.fffTiming.monitor.confirm;
     const label = button.textContent;
     let timer = null;
     const control = {
@@ -82,7 +84,7 @@
       if (timer === null) {
         button.textContent = opts.armedLabel || "กดอีกครั้งเพื่อยืนยัน";
         button.classList.add("confirm-armed");
-        timer = setTimeout(() => control.disarm(), timeoutMs);
+        timer = setTimeout(() => control.disarm(), armedFor());
         return;
       }
       control.disarm();

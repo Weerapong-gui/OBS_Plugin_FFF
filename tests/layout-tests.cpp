@@ -143,6 +143,70 @@ int main(int argc, char **argv)
 	check(post(cardTemplate, QStringLiteral("template")) == 200, "template API saves");
 	check(post(R"({"image":{}})", QStringLiteral("template")) == 400, "invalid template rejected");
 	const auto savedTemplate = state(session).value("cardTemplate");
+
+	// The Show Status title: the one piece on that board made of words.
+	check(!state(session).contains("headingTemplate"), "no title template until one is set");
+	const QByteArray headingTemplate =
+		R"({"piece":"heading","box":{"x":0,"y":0,"width":420,"height":100},"text":"COMPETITION\nSTATUS",)"
+		R"("fontFamily":"Bai Jamjuree","fontSize":38,"fontWeight":800,"lineHeight":42,)"
+		R"("align":"left","color":"#000000"})";
+	check(post(headingTemplate, QStringLiteral("template")) == 200, "title template saves");
+	const auto savedHeading = state(session).value("headingTemplate");
+	check(savedHeading.toObject().value("text").toString() == QLatin1String("COMPETITION\nSTATUS") &&
+		      !savedHeading.toObject().contains("piece") && !savedHeading.toObject().contains("mode"),
+	      "the stored title keeps no routing fields");
+	check(post(R"({"piece":"heading","mode":"bottomBar","box":{"x":0,"y":0,"width":420,"height":100},)"
+		   R"("text":"x","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,)"
+		   R"("align":"left","color":"#000000"})",
+		   QStringLiteral("template")) == 400,
+	      "the title belongs to Show Status, not the bottom bar");
+	// One refusal per field that could reach the stream as something else.
+	const auto badHeading = [&](const char *body) {
+		return post(QByteArray("{\"piece\":\"heading\",\"box\":{\"x\":0,\"y\":0,\"width\":420,\"height\":100},") +
+				    body,
+			    QStringLiteral("template"));
+	};
+	check(badHeading(R"("text":"a\tb","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+		      400,
+	      "a control character in the title is refused");
+	check(badHeading(R"("text":"a","fontFamily":"Bad\"Family","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+		      400,
+	      "a family name that could escape the declaration is refused");
+	check(badHeading(R"("text":"a","fontFamily":"","fontSize":4,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})") ==
+		      400,
+	      "an unreadable size is refused");
+	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":950,"lineHeight":42,"align":"left","color":"#000000"})") ==
+		      400,
+	      "a weight no face can have is refused");
+	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"middle","color":"#000000"})") ==
+		      400,
+	      "an alignment that is not one of the three is refused");
+	check(badHeading(R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"black"})") ==
+		      400,
+	      "a colour that is not #rrggbb is refused");
+	check(state(session).value("headingTemplate") == savedHeading, "refused titles change nothing");
+
+	// Animation lengths. Every key is named, so a value can never be filed
+	// under a motion it does not belong to, and a session that carries none
+	// simply leaves every animation at the length the web pages default to.
+	check(!state(session).contains("timing"), "no timing until one is set");
+	const QByteArray timing =
+		R"({"scoreboard":{"card":900,"stagger":40},"board":{"countRoll":800,"countTick":40},"monitor":{"confirm":5000}})";
+	check(post(timing, QStringLiteral("timing")) == 200, "timing API saves");
+	const auto savedTiming = state(session).value("timing");
+	check(savedTiming.toObject().value("scoreboard").toObject().value("card").toDouble() == 900 &&
+		      savedTiming.toObject().value("board").toObject().value("countTick").toDouble() == 40,
+	      "timing reaches overlay state");
+	check(post(R"({"scoreboard":{"card":-1}})", QStringLiteral("timing")) == 400, "negative duration rejected");
+	check(post(R"({"scoreboard":{"card":5001}})", QStringLiteral("timing")) == 400, "over-long duration rejected");
+	check(post(R"({"board":{"countTick":5}})", QStringLiteral("timing")) == 400, "too fast a tick rejected");
+	check(post(R"({"monitor":{"confirm":100}})", QStringLiteral("timing")) == 400, "too short a confirm rejected");
+	check(post(R"({"scoreboard":{"card":"slow"}})", QStringLiteral("timing")) == 400, "nonnumeric duration rejected");
+	check(post(R"({"scoreboard":{"nosuchthing":100}})", QStringLiteral("timing")) == 400, "unknown key rejected");
+	check(post(R"({"nosuchgroup":{"card":100}})", QStringLiteral("timing")) == 400, "unknown group rejected");
+	check(post(R"({"scoreboard":600})", QStringLiteral("timing")) == 400, "group that is not an object rejected");
+	check(state(session).value("timing") == savedTiming, "refused timing changes nothing");
+
 	session.forceReveal();
 	check(session.phase() == FffPhase::Revealed, "reveal works");
 	session.clearRound();
@@ -153,6 +217,10 @@ int main(int argc, char **argv)
 	check(state(reopened).value("pieces") == saved, "restart preserves layouts");
 	check(state(reopened).value("layers") == savedLayers, "restart preserves layers");
 	check(state(reopened).value("cardTemplate") == savedTemplate, "clear and restart preserve template");
+	check(state(reopened).value("timing") == savedTiming, "clear and restart preserve timing");
+	check(state(reopened).value("headingTemplate") == savedHeading, "clear and restart preserve the title");
+	check(QJsonDocument::fromJson(session.phoneStateJson(person.id)).object().value("timing") == savedTiming,
+	      "the phone's flag buttons get the lengths too");
 	check(!QJsonDocument::fromJson(session.phoneStateJson(person.id)).object().contains("pieces"),
 	      "phone has no layouts");
 	check(post(R"({"target":"card:one","reset":true})") == 200, "reset card");
@@ -580,6 +648,11 @@ int main(int argc, char **argv)
 	changedTemplate.insert("result", resultLayer);
 	check(post(QJsonDocument(changedTemplate).toJson(), QStringLiteral("template")) == 500,
 	      "failed template write reported");
+	check(post(R"({"scoreboard":{"card":1234}})", QStringLiteral("timing")) == 500, "failed timing write reported");
+	check(post(R"({"piece":"heading","box":{"x":0,"y":0,"width":420,"height":100},"text":"changed",)"
+		   R"("fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})",
+		   QStringLiteral("template")) == 500,
+	      "failed title write reported");
 	check(post(R"({"target":"heading","reset":true})") == 500, "failed write reported");
 	check(post(R"({"target":"all","reset":true})") == 500, "failed reset reported");
 	check(!session.showMode(QStringLiteral("bottomBar")), "failed display reported");
@@ -616,5 +689,6 @@ int main(int argc, char **argv)
 		      old.round() == 5 && old.cover().isEmpty() && old.coverUrl().isEmpty() &&
 		      state(old).value("bottomBar").toObject().value("pieces").toObject().isEmpty(),
 	      "old session retains launch behavior with empty bottom bar");
+	check(!state(old).contains("timing"), "a session without timing keeps the default lengths");
 	qInfo("PASS: layout/layer APIs, legacy session, persistence, rounds, validation, resets, failed writes");
 }

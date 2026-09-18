@@ -38,7 +38,8 @@ int main(int argc, char **argv)
 	for (const char *path : {"/api/events/overlay", "/api/monitor/access"})
 		check(classify("GET", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor reads");
 	for (const char *path :
-	     {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset", "/api/template"})
+	     {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset", "/api/template",
+	      "/api/timing"})
 		check(classify("POST", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor writes");
 	for (const char *path : {"/api/display", "/api/logo"})
 		check(classify("POST", QString::fromLatin1(path)) == Endpoint::LocalOnly, "on-air controls");

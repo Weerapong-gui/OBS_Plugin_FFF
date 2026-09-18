@@ -41,6 +41,7 @@
   <div class="dialog-actions"><button id="cancelLogout" class="secondary" autofocus>ยกเลิก</button><button id="confirmLogout" class="primary">ออก</button></div>
 </dialog>
 
+<script src="/timing.js"></script>
 <script>
 const KEY = "fff-token";
 const PIN_KEY = "fff-pin";
@@ -108,7 +109,9 @@ function render() {
 }
 
 function paint(state) {
-  if (!state || !state.you) return;
+  if (!state) return;
+  applyTiming(state.timing);
+  if (!state.you) return;
   lastState = state;
   if (currentRound !== null && state.round !== currentRound) {
     desired = null; pendingVote = false;

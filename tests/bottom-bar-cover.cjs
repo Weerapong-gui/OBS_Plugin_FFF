@@ -52,24 +52,27 @@ const installEntranceHelper = () => {
       await overlay.evaluate(s => render(s), state);
       await monitor.evaluate(s => { editMode = "bottomBar"; render(s); }, state);
     };
+    // The lengths belong to the timing module; these checks are about the shape
+    // of the entrance and about the page honouring whatever it is given.
+    const BB = await overlay.evaluate(() => JSON.parse(JSON.stringify(FFF_TIMING_DEFAULTS.bottomBar)));
     await push();
     const entrance = await overlay.evaluate(() => Object.fromEntries([...board.querySelectorAll(".piece")].map(piece => {
       const motion = piece.querySelector(".bottom-motion");
       const animation = motion.getAnimations().find(a => a.effect.getKeyframes().some(k => k.opacity !== undefined));
       return [piece.dataset.target, { timing: animation.effect.getTiming(), frames: animation.effect.getKeyframes() }];
     })));
-    assert.equal(entrance.logo.timing.duration, 240, "logo enters in 240ms");
-    assert.equal(entrance.cover.timing.duration, 400, "cover fades in 400ms");
+    assert.equal(entrance.logo.timing.duration, BB.logo, "logo enters on the logo timing");
+    assert.equal(entrance.cover.timing.duration, BB.cover, "cover fades on the cover timing");
     for (const target of ["card:a", "card:b"]) {
-      assert.equal(entrance[target].timing.duration, 600);
-      assert.equal(entrance[target].timing.delay, 100);
+      assert.equal(entrance[target].timing.duration, BB.card);
+      assert.equal(entrance[target].timing.delay, BB.firstPair);
       assert.equal(entrance[target].timing.easing, "cubic-bezier(0.22, 1, 0.36, 1)");
       assert.match(entrance[target].frames[0].transform, /18px/);
       assert.ok(entrance[target].frames.some(frame => frame.clipPath && frame.clipPath !== "none"), "cards reveal through a clip");
     }
     assert.match(entrance.logo.frames[0].transform, /12px/);
     for (const target of ["count:red", "count:green"]) {
-      assert.equal(entrance[target].timing.duration, 240, "counters enter on the logo's timing");
+      assert.equal(entrance[target].timing.duration, BB.logo, "counters enter on the logo's timing");
       assert.match(entrance[target].frames[0].transform, /12px/);
     }
     assert.ok(entrance.cover.frames.every(frame => !frame.transform || frame.transform === "none"), "cover never travels");
@@ -204,8 +207,9 @@ const installEntranceHelper = () => {
       assert.equal(entries.length, count);
       for (let i = 0; i < count; i++) {
         const half = Math.ceil(count / 2), pair = i < half ? half - 1 - i : i - half;
-        assert.equal(entries[i].timing.delay, 100 + Math.min(pair * 60, 560), `roster ${count} card ${i} center-out delay`);
-        assert.equal(entries[i].timing.duration, 600);
+        assert.equal(entries[i].timing.delay, BB.firstPair + Math.min(pair * BB.pair, BB.maxStagger),
+          `roster ${count} card ${i} center-out delay`);
+        assert.equal(entries[i].timing.duration, BB.card);
         if (i % 2) assert.equal(entries[i].wipeVisible, false, "waiting card never paints vote wipe");
       }
       if (count > 1) {
@@ -322,7 +326,7 @@ const installEntranceHelper = () => {
       // A second flag lands while the first roll is still running.
       s.presidents[0].vote = "red"; render(s);
       const kept = !!started && redRoll() === started;
-      await new Promise(resolve => setTimeout(resolve, COUNT_ROLL.duration + 200));
+      await new Promise(resolve => setTimeout(resolve, COUNT_ROLL().duration + 200));
       return { started: !!started, kept, settled: red.textContent, resting: countRolls().length };
     }, state);
     assert.equal(landing.started, true, "a changed tally starts a roll");
@@ -405,7 +409,7 @@ const installEntranceHelper = () => {
       const decoration = ["logo", "cover"].map(target => board.querySelector(`[data-target="${target}"] .bottom-motion`).getAnimations()[0].effect.getKeyframes());
       return { sampled, first: frames[0], last: frames.at(-1), timing: a.effect.getTiming(), decoration };
     }, state);
-    assert.equal(exitSample.timing.duration, 320);
+    assert.equal(exitSample.timing.duration, BB.exit);
     assert.ok(Math.abs(Number(exitSample.first.opacity) - Number(exitSample.sampled.opacity)) < 0.001, "exit starts at current opacity");
     assert.equal(exitSample.first.transform, exitSample.sampled.transform, "exit starts at current transform");
     assert.equal(exitSample.first.clipPath, exitSample.sampled.clipPath, "exit keeps current reveal extent");
@@ -554,7 +558,7 @@ const installEntranceHelper = () => {
       duration: board.querySelector('[data-target="card:a"] .bottom-motion').getAnimations()[0].effect.getTiming().duration
     }));
     assert.equal(exiting.entering, false, "hiding plays the exit, not a cut");
-    assert.equal(exiting.duration, 320, "hiding uses the documented exit timing");
+    assert.equal(exiting.duration, BB.exit, "hiding uses the documented exit timing");
     await warm.waitForFunction(() => wrap.hidden, { polling: 20 });
     const restored = await warm.evaluate(s => {
       render(s);
@@ -574,6 +578,38 @@ const installEntranceHelper = () => {
     }, warming);
     assert.equal(warmedSizes.full, 10, "three cards, three logos per round and a cover are warmed");
     assert.equal(warmedSizes.trimmed, 3, "artwork that left the roster is dropped");
+
+    // The lengths are the session's to set, on this board too, and a counter
+    // roll is motion of its own with its own pair of them.
+    const slower = { ...warming, phase: "revealed",
+      timing: { bottomBar: { logo: 500, cover: 700, card: 950, firstPair: 30, pair: 10 },
+        board: { countRoll: 900, countTick: 90 } } };
+    await warm.evaluate(s => render({ ...s, phase: "collecting" }), slower);
+    await warm.waitForFunction(() => wrap.hidden && !transition, { polling: 20 });
+    const slowEntrance = await warm.evaluate(s => {
+      render(s);
+      return Object.fromEntries([...board.querySelectorAll(".piece")].map(piece => {
+        const animation = piece.querySelector(".bottom-motion").getAnimations()
+          .find(a => a.effect.getKeyframes().some(k => k.opacity !== undefined || k.clipPath !== undefined));
+        return [piece.dataset.target, animation ? animation.effect.getTiming() : null];
+      }));
+    }, slower);
+    assert.equal(slowEntrance.logo.duration, 500, "the logo follows the session");
+    assert.equal(slowEntrance.cover.duration, 700, "so does the cover");
+    assert.equal(slowEntrance["count:red"].duration, 500, "and the counters");
+    // Three cards: two on the left in centre-out order, one on the right, so
+    // the pair indices are 1, 0 and 0 and the delays are the session's.
+    const slowCards = Object.entries(slowEntrance).filter(([target]) => target.startsWith("card:"))
+      .map(([, timing]) => timing);
+    assert.equal(slowCards.length, 3);
+    assert.ok(slowCards.every(timing => timing.duration === 950), "and the cards");
+    assert.deepEqual([...new Set(slowCards.map(timing => timing.delay))].sort((a, b) => a - b), [30, 40],
+      "centre-out delays are the session's first-pair wait plus its pair step");
+    const rollTiming = await warm.evaluate(() =>
+      countRolls().map(animation => animation.effect.getTiming().duration));
+    assert.ok(rollTiming.every(duration => duration === 900), "a counter roll takes the session's length");
+    await warm.waitForFunction(() => !transition, { polling: 20 });
+    await warm.waitForFunction(() => countRolls().length === 0, { polling: 20 });
     await warm.close();
 
     assert.deepEqual(errors, []);

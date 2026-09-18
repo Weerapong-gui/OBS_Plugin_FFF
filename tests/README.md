@@ -124,8 +124,10 @@ than being dropped.
 state — both views derive it from `presidents[].vote`. Natural stacking is
 logo, cards, `count:red`, `count:green`, then `cover` on top.
 
-When a tally changes, the number rolls through random digits for 520 ms in
-50 ms steps (`COUNT_ROLL` in `board.js`) and lands on the newest count. A flag
+When a tally changes, the number rolls through random digits for `countRoll` in
+`countTick` steps (`COUNT_ROLL()` in `board.js`, read at the start of each roll
+so one roll's frames and clock can never disagree) and lands on the newest
+count. A flag
 arriving mid-roll updates the landing value without restarting the roll, so the
 board can never settle back on a stale number. Digits come from a seeded
 sequence read off the roll's own animation clock, so a paused frame is
@@ -166,6 +168,161 @@ a roster built before these fields still goes on air unchanged. `board.js` draws
 its default `display: none` — the flag colour belongs to the bottom bar. The
 `waiting` class stays what it always was, the monitor's marker for a slot with
 nothing to show, so it never sits over finished artwork.
+
+### Where the board sits
+
+Show Status is a status board pinned to the upper left of frame, the way the
+broadcast artwork draws it, rather than a block centred on the canvas. `.board`
+is the whole 1920x1080 canvas on both boards now and places every piece itself:
+`STATUS_STACK` in `board.js` puts row *i* at `left: 55px, top: 201 + i * 57.23`,
+measured off the reference artwork (rows 346x51 with a 6px gap). The pitch is
+fixed rather than taken from each card's height, so a PNG exported a pixel or
+two taller cannot push every row below it out of step — artwork much taller
+than the pitch will overlap, which is the one thing to watch when exporting.
+
+Because a board is now the canvas, neither mode has a meaningful whole-board
+offset or zoom left: `modeState()` pins `layout` to centre/100% for both, the
+way it already did for BOTTOM BAR, and moving a piece is the only thing that
+moves anything. That also retires whatever a session saved back when the
+scoreboard was a grid centred on that point, which would otherwise drag the
+stack off frame. The whole-board `POST /api/layout` still stores and returns
+its value; it simply no longer draws anything.
+
+A saved `pieces` entry still wins over the stack, so a card the operator placed
+stays where it was put, and `reset` returns it to its row.
+
+### The title above the stack
+
+`heading` was always a layout and layer target; it is now a piece again, and the
+one on that board made of words rather than artwork. It carries its own
+`headingTemplate`, the way the flag counters carry theirs:
+
+```jsonc
+{"mode":"scoreboard","piece":"heading",
+ "box":{"x":0,"y":0,"width":420,"height":100,"opacity":1},
+ "text":"COMPETITION\nSTATUS", "fontFamily":"Bai Jamjuree",
+ "fontSize":38, "fontWeight":800, "lineHeight":42,
+ "align":"left", "color":"#000000"}
+```
+
+`piece` of `heading` requires `"mode":"scoreboard"` and is rejected with 400
+otherwise, the mirror of `logo` and `count` requiring `bottomBar`. The box is in
+the piece's own pixels and opens matching its CSS box (54, 72 on the canvas),
+which is where the reference artwork puts the title. `text` is at most 200
+characters over at most 8 lines; newlines are the two-line title and every other
+control character is refused. `fontSize` and `lineHeight` are 8–400 px,
+`fontWeight` 100–900, `align` one of `left`/`center`/`right`, and `color` is
+`#rrggbb`. `validFontFamily()` and `validHexColor()` are the same ones the
+counter template uses, so a family name still travels as text and still cannot
+break out of the CSS declaration.
+
+`headingOf()` in `board.js` is the one place the defaults live, so a session
+saved before the title existed — or one the operator has not touched — draws the
+artwork's own words, and the panel opens on exactly what the board would draw.
+The monitor's **ชิ้นงาน** list offers the title in Show Status, so it drags,
+layers and resets like any other piece, and the template panel gains a fourth
+kind for it, reusing the installed-font picker (`queryLocalFonts`, the face to
+weight mapping and the missing-font note) that the counters already had. The
+title previews on the stage as it is typed and reaches the board only on apply.
+
+The title is the board's furniture, not one of its rows: it enters with the
+first card rather than taking a place in the entrance stagger, so adding it left
+every card's timing exactly where it was. `layoutKey()` in `overlay.html`
+includes `headingTemplate`, or a change to the words alone would not be measured
+on a board that is off air.
+
+### A card's box is its PNG's box
+
+A Show Status card is its artwork and nothing else, so `.slot` takes the PNG's
+own pixels: `fitCardToImage()` in `board.js` writes `naturalWidth`/
+`naturalHeight` onto the slot, and `applyCardTemplate()` gives `.card-image`
+`inset: 0` on this board instead of the template's rectangle. The slot's box is
+therefore the picture's box — what the operator drags, what `#symmetry` reads
+and what the overlay's reveal clips to are one rectangle, with no letterbox
+margin to guess at. The placement frame is an `outline`, not a `border`, because
+under the stylesheet's `border-box` sizing a 2px border would eat 4px of the
+picture; `.monitor .slot.waiting` still marks an empty slot, which keeps the
+420×152 default (`EMPTY_SLOT`).
+
+Artwork larger than the stream already arrives shrunk (see **Asset
+renditions**), so a card can never outgrow 1920×1080. Cards no longer share one
+size, so the monitor's "ใช้ตาราง" measures each card rather than assuming a fixed
+cell.
+
+The card template keeps what still means something here — stacking order and
+opacity — and its image rectangle does not. The panel says so: on Show Status
+the image layer's X/Y/width/height report the PNG's box, are disabled, and
+cannot be dragged or resized. BOTTOM BAR is unchanged; its cards are still laid
+out by `renderBottomBar()` and sized by `bottomBar.cardTemplate`.
+
+Sizes ride no API and are never saved: they are read from the decoded image, so
+replacing a president's PNG moves the box with it on the next `load`. The
+monitor coalesces that `load` into one relayout the way the overlay does;
+without it the preview measures boxes that have since grown.
+
+Row tops are rounded to whole pixels. A row on a half pixel is a row the
+compositor resamples, and it also lands closer to the reference artwork than
+the raw pitch does. `EMPTY_SLOT` is the reference card's own 346x51 so a roster
+with no artwork yet still reads as one row per president rather than a stack of
+overlapping boxes, and the monitor names any card whose PNG is taller than the
+pitch (`#stackWarning`) because a fixed pitch cannot absorb it.
+
+## Animation lengths
+
+`data/web/timing.js` (served at `/timing.js`, loaded by both `/monitor` and
+`/overlay`) holds every duration the presentation spends on screen, grouped by
+the family of motion it belongs to:
+
+```jsonc
+{"scoreboard": {"card", "stagger", "maxStagger", "exit", "exitStagger", "maxExitStagger"},
+ "bottomBar":  {"logo", "cover", "card", "firstPair", "pair", "maxStagger", "exit"},
+ "board":      {"reveal", "countRoll", "countTick", "slotFrame"},
+ "monitor":    {"guide", "control", "confirm"},
+ "phone":      {"flag"}}
+```
+
+Only the lengths live there. Easings, keyframes and the order things move in are
+the design and stay where they are drawn, so a number here makes the same
+animation longer or shorter, never a different one. `applyTiming(state.timing)`
+runs before every render on both pages: it merges the session's values over the
+defaults and publishes `--fff-dur-reveal`, `--fff-dur-slot`, `--fff-dur-guide`
+`--fff-dur-control` and `--fff-dur-flag` for the stylesheet's share of the
+motion. A value that
+is missing, the wrong type or out of range keeps its default rather than
+becoming zero, so a partial object is a valid one.
+
+`POST /api/timing` takes that object and uses the same permissions as
+`/api/layout`. Durations and staggers are 0–5000 ms, `countTick` is 10–500 ms
+and `confirm` is 500–30000 ms; an unknown group or key, a nonnumeric value or a
+group that is not an object returns 400. `FffSession::validTiming()` holds the
+ranges and `kTimingKeys` mirrors `FFF_TIMING_DEFAULTS`, so a number the panel
+offers is a number the plugin will store. Sessions written before this existed
+have no `timing` and keep every default; session JSON stays at version 5 and
+overlay SSE carries `timing` once at the root, not per mode.
+
+The voter's page animates too, so `phoneStateJson()` carries `timing` and
+`/phone` loads the same module. That is the only part of the session a phone
+gets beyond its own president — placements, templates and the roster all stay
+with the operator.
+
+The monitor's **จังหวะ** tab builds one field per length straight from
+`FFF_TIMING_DEFAULTS`, drafts them the way the template panel drafts a box —
+nothing reaches the stream until apply — clamps to the ranges above, rolls the
+panel back on a refused save, and follows the session when a value arrives over
+SSE. `armConfirm()` reads `monitor.confirm` at the press rather than at set-up,
+so a change takes effect without a reload.
+
+Network patience is not motion and is not offered here: the save timeouts
+(`SAVE_TIMEOUT_MS`), the retry pump (`SAVE_RETRY_MS`) and the server's heartbeat
+are named constants in their own files.
+
+The motion checks read their expected lengths from `FFF_TIMING_DEFAULTS` rather
+than repeating them, and cover a session that sets its own: Show Status
+entrance, stagger and exit, BOTTOM BAR logo/cover/card/centre-out delays, the
+counter roll, the phone's flag buttons, and the CSS custom properties. Nothing
+in `data/web/` declares a `transition` or `animation` duration that does not
+come from `fffTiming` or a `var(--fff-dur-*)` with the matching default as its
+fallback.
 
 `POST /api/status` `{"presidentId", "status"}` is localhost-only and rejects a
 status that is not one of the three rather than silently falling back to
@@ -265,9 +422,10 @@ NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/bottom-bar-cover.cjs
 cmake --build --preset macos
 ```
 
-The focused cover suite checks the actual Web Animations timings: logo and both
-counters 240ms, cover 400ms, cards 600ms with a 100ms start and center-out pairs 60ms apart
-(stagger capped at 560ms), and interrupted exits 320ms. It samples animation
+The focused cover suite checks the actual Web Animations timings against
+`FFF_TIMING_DEFAULTS.bottomBar`: logo and both counters on `logo`, the cover on
+`cover`, cards on `card` starting after `firstPair` with centre-out pairs `pair`
+apart (capped at `maxStagger`), and interrupted exits on `exit`. It samples animation
 progress directly, exercises roster changes and template overflow during entry,
 and checks that resting Overlay and Monitor retain no temporary wipe or clip.
 Live vote updates must leave existing pieces attached; roster reordering keeps

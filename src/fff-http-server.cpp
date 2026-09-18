@@ -74,6 +74,7 @@ QByteArray deniedText(const QString &path)
 	static const QHash<QString, QByteArray> texts = {
 		{QStringLiteral("/api/events/overlay"), QByteArrayLiteral("overlay is local only")},
 		{QStringLiteral("/api/template"), QByteArrayLiteral("template is local only")},
+		{QStringLiteral("/api/timing"), QByteArrayLiteral("timing is local only")},
 		{QStringLiteral("/api/status"), QByteArrayLiteral("status is local only")},
 		{QStringLiteral("/api/asset"), QByteArrayLiteral("uploads are local only")},
 		{QStringLiteral("/api/operator/vote"), QByteArrayLiteral("operator controls are local only")},
@@ -402,6 +403,10 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendWebFile(socket, QStringLiteral("app.css"), "text/css; charset=utf-8");
 			return;
 		}
+		if (path == QLatin1String("/timing.js")) {
+			sendWebFile(socket, QStringLiteral("timing.js"), "application/javascript; charset=utf-8");
+			return;
+		}
 		if (path == QLatin1String("/board.js")) {
 			sendWebFile(socket, QStringLiteral("board.js"), "application/javascript; charset=utf-8");
 			return;
@@ -481,10 +486,24 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 				sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
 				return;
 			}
-			// The logo and the flag counters are Bottom Bar furniture: there
-			// is nothing on the scoreboard for them to describe.
-			if (piece != QLatin1String("card") && mode != QLatin1String("bottomBar")) {
+			// The logo and the flag counters are Bottom Bar furniture and
+			// the title is Show Status furniture: each board has nothing for
+			// the other's pieces to describe.
+			const bool bottom = mode == QLatin1String("bottomBar");
+			const bool wrongBoard =
+				piece == QLatin1String("heading") ? bottom : piece != QLatin1String("card") && !bottom;
+			if (wrongBoard) {
 				sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+				return;
+			}
+			if (piece == QLatin1String("heading")) {
+				if (!FffSession::validHeadingTemplate(value)) {
+					sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+					return;
+				}
+				const bool saved = m_session->setHeadingTemplate(value);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 				return;
 			}
 			if (piece == QLatin1String("card")) {
@@ -507,6 +526,16 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 				return;
 			}
 			const bool saved = m_session->setBottomTemplate(piece, value);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		if (path == QLatin1String("/api/timing")) {
+			const auto value = QJsonDocument::fromJson(body).object();
+			if (!FffSession::validTiming(value)) {
+				sendJson(socket, 400, "{\"error\":\"invalid timing\"}");
+				return;
+			}
+			const bool saved = m_session->setTiming(value);
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}

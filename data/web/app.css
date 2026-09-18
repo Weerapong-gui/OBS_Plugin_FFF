@@ -21,7 +21,7 @@
 .template-panel h2 { margin: 0; font-size: 20px; }
 .template-panel p { color: var(--muted); font-size: 13px; }
 .template-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
-.template-panel button, .template-panel input, .template-panel select { background: #252e3a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.template-panel button, .template-panel input, .template-panel select, .template-panel textarea { background: #252e3a; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 .template-panel button { cursor: pointer; }
 .template-panel button:disabled { opacity: 0.55; cursor: default; }
 /* Panning replaces the scrollbars, so the stage is clipped and its position is
@@ -30,9 +30,11 @@
   background-image: conic-gradient(#343a43 25%, transparent 0 50%, #343a43 0 75%, transparent 0);
   background-size: 20px 20px; }
 #templateStage { position: absolute; left: 0; top: 0; width: 420px; height: 152px; transform-origin: top left; }
-#templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; transform: translate(2px, 2px); }
+/* The stage's slot has no border, so a box drawn here sits exactly where the
+   template box says — no 2px allowance to keep in step with the stylesheet. */
+#templateSelection { position: absolute; outline: 2px solid var(--accent); z-index: 5; pointer-events: auto; cursor: move; }
 #templateResize { position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px; padding: 0; border-radius: 0; background: var(--accent); pointer-events: auto; cursor: nwse-resize; }
-#templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; transform: translate(2px, 2px); }
+#templatePlaceholder { position: absolute; border: 2px dashed #a5b4cc; color: white; display: grid; place-items: center; pointer-events: none; }
 #templatePlaceholder[hidden] { display: none; }
 /* The panel swaps between the card, logo and counter templates, and each of
    these carries its own display rule that would otherwise outrank [hidden]. */
@@ -42,6 +44,10 @@
 #templateLayers [aria-pressed="true"] { border-color: var(--accent); background: #234666; }
 .template-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .template-fields label { display: grid; gap: 4px; }
+/* The title's words get a field of their own: it is the only one on this panel
+   that is more than a number, and newlines in it are the two-line title. */
+.template-text { display: grid; gap: 4px; margin-bottom: 8px; font-size: 13px; }
+.template-text textarea { width: 100%; min-width: 0; resize: vertical; font: inherit; line-height: 1.4; }
 .template-fields input, .template-fields select { width: 100%; min-width: 0; }
 /* A colour input collapses to a hairline under the panel's shared padding. */
 .template-fields input[type="color"] { height: 38px; padding: 2px; cursor: pointer; }
@@ -152,7 +158,7 @@ body.phone {
   font-weight: 800;
   color: #fff;
   opacity: 0.45;
-  transition: opacity 0.12s ease, border-color 0.12s ease;
+  transition: opacity var(--fff-dur-flag, 120ms) ease, border-color var(--fff-dur-flag, 120ms) ease;
 }
 
 .flag.red {
@@ -210,13 +216,15 @@ body.phone {
   color: var(--muted);
 }
 
+/* Both boards use the same 1920 x 1080 geometry in preview and on air, and
+   place every piece themselves: Show Status stacks its rows at the upper left
+   the way the broadcast artwork draws them (STATUS_STACK in board.js), and the
+   operator moves any of them from there. */
 .board {
   position: relative;
-  display: grid;
-  /* Column count is set from the roster size so the board hugs its content —
-     the position and symmetry readout mean nothing if it is padded out. */
-  gap: 28px 34px;
-  width: max-content;
+  display: block;
+  width: 1920px;
+  height: 1080px;
 }
 
 .piece {
@@ -226,10 +234,31 @@ body.phone {
   pointer-events: auto;
 }
 
+/* The title above the stack. Its box, type and colour are the operator's, so
+   nothing here may pin one of them — the same rule the flag counters keep.
+   Synthesis is off so a weight the face does not really have falls back the
+   same way in the panel and on air instead of being faked differently. */
 .heading-piece {
-  width: max-content;
-  margin-bottom: 20px;
+  position: absolute;
+  left: 54px;
+  top: 72px;
+  width: 420px;
+  height: 100px;
 }
+
+.heading-text {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  white-space: pre-line;
+  font-synthesis: none;
+}
+
+/* A title with nothing in it is still a piece the operator has to be able to
+   grab, so the monitor keeps its box visible. */
+.monitor .heading-piece.empty-heading { outline: 2px dashed #88929f; }
 
 .piece > .slot {
   width: 100%;
@@ -250,22 +279,29 @@ body.phone {
   outline-offset: 5px;
 }
 
+/* The size here is only the empty-slot frame, and it is the reference
+   artwork's own card so an empty roster reads as one row per president
+   (EMPTY_SLOT in board.js keeps the same pair). A slot holding artwork is
+   sized from that PNG, so the slot's box is the picture's box. The placement
+   frame is an outline rather than a border for the same reason: under the
+   file's border-box sizing a border would eat 4px of the picture. */
 .slot {
-  width: 420px;
-  height: 152px;
+  width: 346px;
+  height: 51px;
   position: relative;
   background: transparent;
-  border: 2px solid transparent;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
   border-radius: 0;
   overflow: visible;
-  transition: border-color 0.25s ease, background 0.25s ease;
+  transition: outline-color var(--fff-dur-slot, 250ms) ease, background var(--fff-dur-slot, 250ms) ease;
 }
 
 /* The operator needs a visible placement frame before voting, but the on-air
    overlay should contain only the imported PNG and any flag-result colour. */
 .monitor .slot.waiting {
   background: rgba(244, 246, 248, 0.12);
-  border-color: rgba(244, 246, 248, 0.4);
+  outline-color: rgba(244, 246, 248, 0.4);
 }
 
 .slot .card-image {
@@ -303,7 +339,7 @@ body.phone {
 }
 
 .reveal-in {
-  animation: pop 0.35s ease;
+  animation: pop var(--fff-dur-reveal, 350ms) ease;
 }
 
 @keyframes pop {
@@ -367,7 +403,9 @@ body.overlay {
    deck, and while animating, so the entrance never starts by creating a layer
    per card. The Bottom Bar has its own rules above. */
 .overlay .board-wrap[hidden].on-deck .board:not(.bottom-bar) > .piece > .slot,
-.overlay .board:not(.bottom-bar) > .piece.is-animating > .slot {
+.overlay .board-wrap[hidden].on-deck .board:not(.bottom-bar) > .piece > .heading-text,
+.overlay .board:not(.bottom-bar) > .piece.is-animating > .slot,
+.overlay .board:not(.bottom-bar) > .piece.is-animating > .heading-text {
   will-change: transform, opacity;
 }
 
@@ -480,7 +518,7 @@ body.monitor {
   opacity: 0;
   z-index: 1;
   pointer-events: none;
-  transition: opacity 0.08s linear;
+  transition: opacity var(--fff-dur-guide, 80ms) linear;
 }
 
 .guide.on {
@@ -555,7 +593,7 @@ body.monitor {
   background: #1a212b;
   color: var(--text);
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color var(--fff-dur-control, 150ms) ease, background var(--fff-dur-control, 150ms) ease;
 }
 
 .controls button:hover:enabled, .controls select:hover:enabled {
@@ -668,7 +706,7 @@ body.monitor {
 /* Bottom bar uses the same 1920 × 1080 geometry in preview and on air. */
 .board.bottom-bar { display: block; width: 1920px; height: 1080px; }
 .bottom-bar .slot, .monitor .bottom-bar .slot.waiting,
-#templateSlot.bottom-template { border: 0; background: transparent; }
+#templateSlot.bottom-template { outline: 0; background: transparent; }
 .bottom-bar .center-logo { position: absolute; left: 850px; top: 830px; width: 220px; height: 250px; }
 .center-logo img { width: 100%; height: 100%; object-fit: contain; }
 .bottom-bar .bottom-cover { position:absolute; left:0; top:0; width:1920px; height:1080px; }
@@ -706,6 +744,16 @@ body.monitor {
 .opacity-controls input { width: 70px; }
 
 .grid-tools[hidden] { display: none; }
+
+/* Artwork that will overlap the row below it. Amber like the air warning: it
+   is something to fix before the show, not an error. */
+.stack-warning { color: var(--amber); margin: 0; }
+.stack-warning[hidden] { display: none; }
+
+/* The timing panel is one group of number fields per family of motion. */
+.timing-group { margin: 0 0 14px; }
+.timing-group h3 { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.timing-group .template-fields label { font-size: 12px; }
 
 /* ---------- monitor: pinned tools and side tabs ---------- */
 

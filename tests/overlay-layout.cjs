@@ -48,7 +48,8 @@ const server = http.createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     if (failSaves) { res.writeHead(500); res.end(); return; }
     const { mode, piece, ...template } = JSON.parse(body);
-    const key = piece === "logo" ? "logoTemplate" : piece === "count" ? "countTemplate" : "cardTemplate";
+    const key = piece === "logo" ? "logoTemplate" : piece === "count" ? "countTemplate"
+      : piece === "heading" ? "headingTemplate" : "cardTemplate";
     (mode === "bottomBar" ? state.bottomBar : state)[key] = template; push();
     res.writeHead(200); res.end('{"ok":true}'); return;
   }
@@ -177,7 +178,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const file = { "/": "phone.html", "/overlay": "overlay.html", "/monitor": "monitor.html",
-    "/board.js": "board.js", "/template-editor.js": "template-editor.js", "/view-zoom.js": "view-zoom.js", "/monitor-ui.js": "monitor-ui.js",
+    "/board.js": "board.js", "/timing.js": "timing.js",
+    "/template-editor.js": "template-editor.js", "/view-zoom.js": "view-zoom.js", "/monitor-ui.js": "monitor-ui.js",
     "/app.css": "app.css" }[req.url];
   if (!file) { res.writeHead(404); res.end(); return; }
   res.setHeader("Content-Type", file.endsWith(".js") ? "application/javascript" :
@@ -243,7 +245,9 @@ async function main() {
     await overlay.goto(base + "/overlay");
     const settled = () => monitor.waitForFunction(() => !saving && pending.size === 0);
     const ready = async (count) => {
-      await monitor.waitForFunction((n) => board.querySelectorAll(".piece").length === n, {}, count);
+      // The Show Status title is a piece of its own, so counts are of cards.
+      await monitor.waitForFunction((n) =>
+        board.querySelectorAll('.piece[data-target^="card:"]').length === n, {}, count);
     };
     await ready(6);
     assert.equal(await overlay.evaluate(() => wrap.hidden), true);
@@ -253,7 +257,7 @@ async function main() {
       push();
       await ready(count);
       await overlay.waitForFunction((n) => !wrap.hidden &&
-        board.querySelectorAll(".piece").length === n, {}, count);
+        board.querySelectorAll('.piece[data-target^="card:"]').length === n, {}, count);
       if (count === 1 || count === 5 || count === 6) {
         await monitor.waitForFunction(() => board.querySelector('[data-target="card:0"] .card-image').naturalWidth > 0);
         await overlay.waitForFunction(() => board.querySelector('[data-target="card:0"] .card-image').naturalWidth > 0);
@@ -377,8 +381,70 @@ async function main() {
     close(await geometry(monitor, "card:0"), await geometry(overlay, "card:0"), "retry reaches overlay");
     console.log("PASS: real pointer drag, vote during drag, independent placement, failed save and retry");
 
-    assert.equal(await monitor.$('[data-target="heading"]'), null);
-    assert.equal(await overlay.$('[data-target="heading"]'), null);
+    // The Show Status title is a piece of its own, drawn where the broadcast
+    // artwork puts it until the operator moves it. The wanted text travels as
+    // an argument: a newline inside a serialised page function does not
+    // survive the round trip.
+    const DEFAULT_TITLE = "COMPETITION\nSTATUS", NEW_TITLE = "FFF\nROUND 2";
+    // waitForFunction serialises its predicate, and a newline inside a string
+    // literal does not survive that; evaluate() with an argument does.
+    const until = async (page, predicate, want, label) => {
+      for (let attempt = 0; attempt < 200; attempt++) {
+        if (await page.evaluate(predicate, want)) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error("timed out waiting for " + label);
+    };
+    for (const page of [monitor, overlay]) {
+      assert.notEqual(await page.$('[data-target="heading"]'), null, "the title is a piece on both views");
+      assert.equal(await page.$eval('[data-target="heading"] .heading-text', el => el.textContent),
+        DEFAULT_TITLE, "and opens on the artwork's own words");
+    }
+    // The title's panel: its words, its type and its colour, previewed on the
+    // stage as they are typed and only reaching the board on apply.
+    await monitor.select("#selection", "heading");
+    await press(monitor, "#tab-template");
+    await until(monitor, want => document.getElementById("templateText").value === want,
+      DEFAULT_TITLE, "the panel to open on the title");
+    assert.equal(await monitor.$eval("#templateHeadingFields", el => el.hidden), false, "the title has its own fields");
+    assert.equal(await monitor.$eval("#templateFontFields", el => el.hidden), false, "and the font picker");
+    assert.equal(await monitor.$eval("#templateLayers", el => el.hidden), true, "a one-box template has no layers");
+    await monitor.$eval("#templateText", (el, want) => { el.value = want; el.dispatchEvent(new Event("input")); }, NEW_TITLE);
+    await monitor.$eval("#templateAlign", el => { el.value = "center"; el.dispatchEvent(new Event("change")); });
+    await monitor.$eval("#templateColorValue", el => { el.value = "#21b04a"; el.dispatchEvent(new Event("input")); });
+    await monitor.$eval("#templateFontSize", el => { el.value = "44"; el.dispatchEvent(new Event("change")); });
+    assert.equal(await monitor.$eval("#templateHeading", el => el.textContent), NEW_TITLE,
+      "the stage previews the draft as it is typed");
+    assert.equal(await monitor.$eval('[data-target="heading"] .heading-text', el => el.textContent),
+      DEFAULT_TITLE, "and the board is left alone until it is applied");
+    await press(monitor, "#templateApply");
+    await until(monitor, want => lastState.headingTemplate?.text === want, NEW_TITLE, "the save to land");
+    for (const page of [monitor, overlay]) {
+      await until(page, want =>
+        board.querySelector('[data-target="heading"] .heading-text').textContent === want,
+        NEW_TITLE, "the applied title");
+      assert.deepEqual(await page.$eval('[data-target="heading"] .heading-text', el => {
+        const style = getComputedStyle(el);
+        return [style.fontSize, style.textAlign, style.color];
+      }), ["44px", "center", "rgb(33, 176, 74)"], "applying reaches both views");
+    }
+    assert.equal(state.headingTemplate.align, "center", "and is stored without the routing fields");
+    assert.equal(state.headingTemplate.piece, undefined);
+    delete state.headingTemplate; push();
+    await until(monitor, want =>
+      board.querySelector('[data-target="heading"] .heading-text').textContent === want,
+      DEFAULT_TITLE, "the title to fall back to the artwork's words");
+    await press(monitor, "#templateCancel");
+    await monitor.select("#selection", "card:0");
+    await press(monitor, "#tab-position");
+
+    const title = await geometry(monitor, "heading");
+    close(title, await geometry(overlay, "heading"), "title geometry matches");
+    assert.ok(Math.abs(title.x - 264) < 1 && Math.abs(title.y - 122) < 1 &&
+      Math.abs(title.width - 420) < 1 && Math.abs(title.height - 100) < 1,
+      `the title opens at the artwork's box (${JSON.stringify(title)})`);
+    assert.equal(await monitor.$eval('[data-target="heading"] .heading-text',
+      el => getComputedStyle(el).color), "rgb(0, 0, 0)", "in the artwork's colour");
     assert.notEqual(await monitor.$eval('#canvas', el => getComputedStyle(el).backgroundImage), 'none');
     await press(monitor, '#showGrid');
     assert.equal(await monitor.$eval('#canvas', el => getComputedStyle(el).backgroundImage), 'none');
@@ -527,7 +593,30 @@ async function main() {
       width: parseFloat(el.style.width), height: parseFloat(el.style.height)
     }));
     await press(monitor, '#templateFit');
-    for (const layer of ["image", "result"]) {
+    // On Show Status the artwork's rectangle is the PNG's own, so the panel
+    // reports it and refuses to let it be typed, dragged or resized. Only the
+    // result placeholder is still the operator's to place.
+    await press(monitor, '[data-layer="image"]');
+    const natural = await monitor.$eval('#templateSlot img',
+      el => ({ width: el.naturalWidth, height: el.naturalHeight }));
+    // Document order: X, Y, width, height.
+    assert.deepEqual(await monitor.$$eval('#templateX, #templateY, #templateWidth, #templateHeight',
+      els => els.map(el => [el.value, el.disabled])),
+      [["0", true], ["0", true], [String(natural.width), true], [String(natural.height), true]],
+      "the image box reads the PNG and cannot be typed");
+    assert.equal(await monitor.$eval('#templateSizeNote', el => el.hidden), false,
+      "the panel says where the card's box comes from");
+    const lockedBefore = await templateBox();
+    const lockedHandle = await monitor.$eval('#templateResize', el => {
+      const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await monitor.mouse.move(lockedHandle.x, lockedHandle.y);
+    await monitor.mouse.down();
+    await monitor.mouse.move(lockedHandle.x + 40, lockedHandle.y + 40, { steps: 3 });
+    await monitor.mouse.up();
+    assert.deepEqual(await templateBox(), lockedBefore, "dragging the locked image box changes nothing");
+    await press(monitor, '#templateCancel');
+    for (const layer of ["result"]) {
       const zoom = await monitor.$eval("#templateStage", el => new DOMMatrix(getComputedStyle(el).transform).a);
       await press(monitor, '[data-layer="' + layer + '"]');
       const original = await templateBox();
@@ -609,7 +698,8 @@ async function main() {
     state.total = 0;
     push();
     await ready(0);
-    assert.equal(await monitor.$eval("#selection", (el) => el.value), "");
+    // With no roster the title is the only piece left to edit.
+    assert.equal(await monitor.$eval("#selection", (el) => el.value), "heading");
 
     // Both views share bottom-bar geometry; selecting an edit mode never changes on-air mode.
     for (const count of [0, 1, 14, 40, 5]) {
@@ -618,7 +708,7 @@ async function main() {
       state.presidents.forEach(p => { p.bottomBarUrl = CARD_PNG; p.logoUrl = CARD_PNG; p.vote = "green"; });
       state.displayMode = "bottomBar"; push();
       await setEditMode(monitor, "bottomBar");
-      await ready(count + 4);
+      await ready(count);
       await overlay.waitForFunction(n => board.querySelectorAll(".piece").length === n && document.querySelector(".bottom-bar"), {}, count + 4);
       await overlay.waitForFunction(() => !transition, { polling: 20 });
       for (const page of [overlay, monitor]) assert.equal(await page.evaluate(() => [...document.querySelectorAll(".bottom-motion")].every(el => getComputedStyle(el).clipPath === "none" && getComputedStyle(el).maskImage === "none" && !el.querySelector(".bottom-wipe"))), true, "resting views contain no motion masks");

@@ -62,6 +62,7 @@
 <div class="canvas-footer">
   <p class="hint">เลือกการ์ดแล้วลาก · Shift + ลากล็อกแนวและดูดเข้าการ์ดอื่น · ลูกศรขยับ 1px</p>
   <output id="symmetry" class="symmetry"></output>
+  <p id="stackWarning" class="hint stack-warning" role="status" hidden></p>
 </div>
 </section>
 <aside class="side-panel">
@@ -70,6 +71,7 @@
     <button type="button" role="tab" id="tab-grid" aria-controls="panel-grid" aria-selected="false" tabindex="-1">ตาราง</button>
     <button type="button" role="tab" id="tab-template" aria-controls="panel-template" aria-selected="false" tabindex="-1">แม่แบบ</button>
     <button type="button" role="tab" id="tab-status-png" aria-controls="panel-status-png" aria-selected="false" tabindex="-1">PNG สถานะ</button>
+    <button type="button" role="tab" id="tab-timing" aria-controls="panel-timing" aria-selected="false" tabindex="-1">จังหวะ</button>
   </div>
   <section id="panel-position" class="controls" role="tabpanel" aria-labelledby="tab-position">
     <div class="control-group" role="group" aria-label="ตำแหน่ง">
@@ -114,13 +116,20 @@
     <label id="templateColorField">ตัวอย่างสี <select id="templateColor"><option value="green">เขียว</option><option value="red">แดง</option></select></label>
   </div>
   <div id="templateViewport"><div id="templateStage">
-    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div><div id="templateCount" class="count-value" hidden></div></div>
+    <div id="templateSlot" class="slot green"><img class="card-image" alt="" /><div class="result"></div><div id="templateCount" class="count-value" hidden></div><div id="templateHeading" class="heading-text" hidden></div></div>
     <div id="templatePlaceholder">PNG ของแต่ละการ์ด</div>
     <div id="templateSelection"><button id="templateResize" aria-label="ลากปรับขนาด"></button></div>
   </div></div>
   <p class="hint">ลากเพื่อย้าย · ลากมุมเพื่อปรับขนาด · Shift + ลากมุม เพื่อรักษาสัดส่วน · เลเยอร์บนสุดอยู่ด้านหน้า</p>
   <div id="templateLayers" role="group" aria-label="เลเยอร์แม่แบบ"></div>
   <div id="templateLayerTools" class="template-toolbar"><button id="templateUp">เลเยอร์ขึ้น</button><button id="templateDown">เลเยอร์ลง</button></div>
+  <div id="templateHeadingFields" hidden>
+    <label class="template-text">ข้อความ <textarea id="templateText" rows="3" maxlength="200" placeholder="COMPETITION&#10;STATUS"></textarea></label>
+    <div class="template-fields">
+      <label>ระยะบรรทัด px <input id="templateLineHeight" type="number" min="8" max="400" step="1" value="42" /></label>
+      <label>จัดชิด <select id="templateAlign"><option value="left">ซ้าย</option><option value="center">กึ่งกลาง</option><option value="right">ขวา</option></select></label>
+    </div>
+  </div>
   <div id="templateFontFields" hidden>
     <div class="template-fields">
       <label>ฟอนต์ในเครื่อง <select id="templateFont"><option value="">ค่าเริ่มต้นของระบบ</option></select></label>
@@ -140,6 +149,7 @@
     <label>กว้าง <input id="templateWidth" type="number" min="1" max="2000" step="1" /></label>
     <label>สูง <input id="templateHeight" type="number" min="1" max="2000" step="1" /></label>
   </div>
+  <p id="templateSizeNote" class="hint" hidden>Show Status ใช้ขอบของ PNG เป็นขอบการ์ด · กล่อง PNG จึงปรับขนาดที่นี่ไม่ได้ — ย่อหรือขยายด้วย ชิ้นงานกว้าง/สูง % ในแท็บตำแหน่ง</p>
   <div class="template-toolbar"><button id="templateApply">ใช้แม่แบบกับทุกการ์ด</button><button id="templateCancel">ยกเลิกการแก้ไข</button></div>
   <p id="templateStatus" role="status"></p>
   </section>
@@ -151,13 +161,30 @@
     </div>
     <p id="statusAssetsHint" class="hint">เลือกการ์ดก่อน แล้วอัปโหลด PNG ของแต่ละสถานะ</p>
   </section>
+  <section id="panel-timing" class="template-panel" role="tabpanel" aria-labelledby="tab-timing" hidden>
+    <h2>จังหวะการเคลื่อนไหว</h2>
+    <p class="hint">ความยาวของแต่ละ animation หน่วยมิลลิวินาที · กดใช้แล้วมีผลทั้งจอมอนิเตอร์และภาพออกอากาศ</p>
+    <div id="timingFields"></div>
+    <div class="template-toolbar">
+      <button id="timingApply" disabled>ใช้จังหวะ</button>
+      <button id="timingCancel" disabled>ยกเลิกการแก้ไข</button>
+      <button id="timingDefaults">คืนค่าเริ่มต้น</button>
+    </div>
+    <p id="timingStatus" role="status"></p>
+  </section>
 </aside></div>
 
 <script src="/view-zoom.js"></script>
+<script src="/timing.js"></script>
 <script src="/board.js"></script>
 <script src="/template-editor.js"></script>
 <script src="/monitor-ui.js"></script>
 <script>
+// How long a save may hang before it is abandoned, and how often abandoned
+// saves are tried again. Network patience, not motion: the timing panel does
+// not offer these because changing them changes nothing on screen.
+const SAVE_TIMEOUT_MS = 5000;
+const SAVE_RETRY_MS = 3000;
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
 const SNAP = 0.015; // fraction of the canvas
@@ -243,6 +270,25 @@ function setCardControls(isCard) {
   document.getElementById("statusAssetsHint").hidden = isCard;
 }
 
+// A row's place on the Show Status stack is fixed, so artwork taller than the
+// pitch quietly overlaps the row below it. Say so in the preview rather than
+// let it reach the stream.
+function cardImageHeight(id) {
+  const piece = pieces.get("card:" + id);
+  const image = piece && piece.element.querySelector(".card-image");
+  return image ? image.naturalHeight : 0;
+}
+function stackWarning() {
+  const warning = document.getElementById("stackWarning");
+  const pitch = Math.round(STATUS_STACK.pitch);
+  const tall = editMode === "bottomBar" ? []
+    : lastState.presidents.filter(president => cardImageHeight(president.id) > STATUS_STACK.pitch);
+  warning.hidden = !tall.length;
+  if (!tall.length) return;
+  warning.textContent = `PNG สูงเกินระยะแถว ${pitch}px จะซ้อนแถวถัดไป · ` +
+    tall.map(president => `${president.name} ${cardImageHeight(president.id)}px`).join(" · ");
+}
+
 function apply() {
   if (!lastState) return;
   const overrides = new Map();
@@ -264,6 +310,7 @@ function apply() {
   for (const button of document.querySelectorAll("[data-vote]"))
     button.setAttribute("aria-pressed", String(button.dataset.vote === (vote || "none")));
   templateEditor.update(lastState, selected);
+  stackWarning();
   if (!piece) { symmetry.textContent = ""; return; }
   const layout = piece.layout;
   for (const [id, key, fallback] of [["imageOpacity", "imageOpacity", templateOpacity(lastState, selected) ?? 1], ["resultOpacity", "resultOpacity", lastState.cardTemplate?.result?.opacity ?? 1], ["pieceWidth", "scaleX", 1], ["pieceHeight", "scaleY", 1]])
@@ -310,7 +357,7 @@ async function flush() {
   saving = true;
   const request = pending.values().next().value;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5000);
+  const timeout = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
   const key = request.mode + ":" + request.target;
   try {
     const res = await fetch("/api/layout", {
@@ -445,18 +492,34 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 canvas.addEventListener("lostpointercapture", endDrag);
 
+// Cards are the size of their own artwork, so the grid is measured from the
+// cards themselves: a column is as wide as its widest card, a row as tall as
+// its tallest, and every card sits centred in its cell. With artwork that
+// happens to share one size this lands exactly where the old fixed cell did.
 function buildGridDraft() {
   const cards = [...pieces.entries()].filter(([key]) => key.startsWith("card:"));
   const columns = Math.max(1, Math.min(3, Number(document.getElementById("gridColumns").value) || 3));
   const gapX = Math.max(0, Number(document.getElementById("gridGapX").value) || 0);
   const gapY = Math.max(0, Number(document.getElementById("gridGapY").value) || 0);
-  const width = 420, height = 152, rows = Math.ceil(cards.length / columns);
-  const startX = (CANVAS_W - (columns * width + (columns - 1) * gapX)) / 2;
-  const startY = (CANVAS_H - (rows * height + (rows - 1) * gapY)) / 2;
+  // The draft resets every piece to scale 1, so the untransformed box is the
+  // size each card will have once the grid is applied.
+  const columnWidth = [], rowHeight = [];
+  cards.forEach(([, item], index) => {
+    const col = index % columns, row = Math.floor(index / columns);
+    columnWidth[col] = Math.max(columnWidth[col] || 0, item.element.offsetWidth);
+    rowHeight[row] = Math.max(rowHeight[row] || 0, item.element.offsetHeight);
+  });
+  const total = (sizes, gap) => sizes.reduce((sum, size) => sum + size, 0) + (sizes.length - 1) * gap;
+  const starts = (sizes, gap, extent) => {
+    let edge = (extent - total(sizes, gap)) / 2;
+    return sizes.map(size => { const at = edge; edge += size + gap; return at; });
+  };
+  const columnX = starts(columnWidth, gapX, CANVAS_W);
+  const rowY = starts(rowHeight, gapY, CANVAS_H);
   return new Map(cards.map(([key, item], index) => {
     const col = index % columns, row = Math.floor(index / columns);
-    return [key, { ...item.layout, x: (startX + col * (width + gapX) + width / 2) / CANVAS_W,
-      y: (startY + row * (height + gapY) + height / 2) / CANVAS_H, scale: 1, scaleX: 1, scaleY: 1 }];
+    return [key, { ...item.layout, x: (columnX[col] + columnWidth[col] / 2) / CANVAS_W,
+      y: (rowY[row] + rowHeight[row] / 2) / CANVAS_H, scale: 1, scaleX: 1, scaleY: 1 }];
   }));
 }
 // One place decides how the three grid buttons read, so the preview button's
@@ -521,7 +584,7 @@ const resetAllConfirm = armConfirm(document.getElementById("resetAll"), () => {
   draft = null;
   for (const [key, request] of pending) if (request.mode === editMode) pending.delete(key);
   queue({ target: "all", reset: true });
-}, { timeoutMs: 3000, armedLabel: "กดอีกครั้งเพื่อรีเซ็ตทั้งหมด" });
+}, { armedLabel: "กดอีกครั้งเพื่อรีเซ็ตทั้งหมด" });
 
 for (const button of document.querySelectorAll("[data-vote]")) {
   button.onclick = async () => {
@@ -613,6 +676,8 @@ for (const button of document.querySelectorAll("[data-layer]")) {
 
 function render(incoming) {
   sourceState = incoming;
+  applyTiming(incoming.timing);
+  if (!timingDirty && !timingSaving) { resetTimingDraft(); paintTiming(); }
   sourceState.bottomBar ||= { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {} };
   const state = modeState(incoming, editMode);
   lastState = state;
@@ -631,6 +696,8 @@ function render(incoming) {
   if (editMode === "bottomBar")
     choices.push(["logo", "โลโก้กลาง"], ["count:red", "จำนวนธงแดง"],
       ["count:green", "จำนวนธงเขียว"], ["cover", "Cover PNG"]);
+  else
+    choices.push(["heading", "ข้อความหัวเรื่อง"]);
   const signature = JSON.stringify(choices);
   if (selection.dataset.choices !== signature) {
     selection.replaceChildren(...choices.map(([key, name]) => new Option(name, key)));
@@ -670,9 +737,123 @@ for (const [id, key] of [["imageOpacity", "imageOpacity"], ["resultOpacity", "re
     commitDraft();
   };
 }
+// ---- timing panel ---------------------------------------------------------
+// Animation lengths belong to the session, so this panel drafts them the way
+// the template panel drafts a box: nothing reaches the stream until the
+// operator presses the apply button.
+const TIMING_GROUPS = [
+  ["scoreboard", "Show Status"],
+  ["bottomBar", "BOTTOM BAR"],
+  ["board", "การ์ดและตัวเลข"],
+  ["monitor", "จอมอนิเตอร์"],
+  ["phone", "หน้าโหวตในมือถือ"]
+];
+const TIMING_LABELS = {
+  scoreboard: { card: "การ์ดเข้า", stagger: "หน่งระหว่างการ์ด",
+    maxStagger: "หน่งรวมสูงสุด", exit: "การ์ดออก",
+    exitStagger: "หน่งตอนออก", maxExitStagger: "หน่งออกรวมสูงสุด" },
+  bottomBar: { logo: "โลโก้กลาง", cover: "Cover", card: "การ์ด",
+    firstPair: "หน่งคู่แรก", pair: "หน่งระหว่างคู่",
+    maxStagger: "หน่งรวมสูงสุด", exit: "ออก" },
+  board: { reveal: "เด้งตอนเปลี่ยนสถานะ", countRoll: "ตัวเลขหมุน",
+    countTick: "ช่วงเปลี่ยนหลัก", slotFrame: "กรอบช่องว่าง" },
+  monitor: { guide: "เส้นไกด์", control: "ปุ่มและช่องเลือก", confirm: "ยืนยันซ้ำ" },
+  phone: { flag: "ปุ่มธง" }
+};
+const timingInputs = new Map();
+let timingDraft = null, timingDirty = false, timingSaving = false;
+const timingStatus = document.getElementById("timingStatus");
+const cloneTiming = value => JSON.parse(JSON.stringify(value));
+
+function buildTimingFields() {
+  document.getElementById("timingFields").replaceChildren(...TIMING_GROUPS.map(([group, title]) => {
+    const section = document.createElement("div");
+    section.className = "timing-group";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const fields = document.createElement("div");
+    fields.className = "template-fields";
+    for (const key of Object.keys(FFF_TIMING_DEFAULTS[group])) {
+      const [min, max] = FFF_TIMING_LIMITS.limitFor(key);
+      const input = document.createElement("input");
+      input.type = "number"; input.min = String(min); input.max = String(max); input.step = "10";
+      input.id = "timing-" + group + "-" + key;
+      input.onchange = () => {
+        const value = input.valueAsNumber;
+        if (timingSaving || !Number.isFinite(value)) { input.value = timingDraft[group][key]; return; }
+        timingDraft[group][key] = Math.min(max, Math.max(min, Math.round(value)));
+        input.value = timingDraft[group][key];
+        timingChanged();
+      };
+      const label = document.createElement("label");
+      label.append(TIMING_LABELS[group][key] + " ", input);
+      fields.appendChild(label);
+      timingInputs.set(group + "." + key, input);
+    }
+    section.append(heading, fields);
+    return section;
+  }));
+}
+function paintTiming() {
+  if (!timingDraft) return;
+  for (const [name, input] of timingInputs) {
+    const [group, key] = name.split(".");
+    if (document.activeElement !== input) input.value = timingDraft[group][key];
+    input.disabled = timingSaving;
+  }
+  document.getElementById("timingApply").disabled = !timingDirty || timingSaving;
+  document.getElementById("timingCancel").disabled = !timingDirty || timingSaving;
+  document.getElementById("timingDefaults").disabled = timingSaving;
+}
+function timingChanged() {
+  timingDirty = true;
+  timingStatus.textContent = "ร่างจังหวะยังไม่ถูกใช้";
+  paintTiming();
+}
+// The session's own values, merged over the defaults, are what the panel edits.
+function resetTimingDraft() { timingDraft = cloneTiming(fffTiming); }
+document.getElementById("timingApply").onclick = async () => {
+  if (timingSaving || !timingDirty) return;
+  const submitted = cloneTiming(timingDraft);
+  timingSaving = true; paintTiming();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+  try {
+    const response = await fetch("/api/timing", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submitted), signal: controller.signal });
+    if (!response.ok) throw new Error("save failed");
+    timingDirty = false;
+    timingStatus.textContent = "ใช้จังหวะแล้ว";
+  } catch (error) {
+    timingDirty = false; resetTimingDraft();
+    timingStatus.textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว";
+  } finally { clearTimeout(timer); timingSaving = false; paintTiming(); }
+};
+document.getElementById("timingCancel").onclick = () => {
+  if (timingSaving) return;
+  timingDirty = false; resetTimingDraft(); timingStatus.textContent = ""; paintTiming();
+};
+document.getElementById("timingDefaults").onclick = () => {
+  if (timingSaving) return;
+  timingDraft = cloneTiming(FFF_TIMING_DEFAULTS);
+  timingChanged();
+};
+buildTimingFields();
+resetTimingDraft();
+paintTiming();
+
 fitCanvas();
-setInterval(flush, 3000);
+setInterval(flush, SAVE_RETRY_MS);
 document.fonts.ready.then(apply);
+// A card PNG that lands late resizes its slot, so the measured geometry has to
+// be taken again once — coalesced, not once per image. The overlay keeps the
+// same listener; without it the preview measures boxes that have since grown.
+let relayout = 0;
+canvas.addEventListener("load", () => {
+  if (relayout) return;
+  relayout = requestAnimationFrame(() => { relayout = 0; apply(); });
+}, true);
 
 const stream = new EventSource("/api/events/overlay");
 stream.onopen = () => { warn.classList.add("hidden"); accessDenied.classList.add("hidden"); };

@@ -14,6 +14,7 @@
   <div id="wrap-bottomBar" class="board-wrap" hidden><div id="board-bottomBar" class="board"></div></div>
 </div>
 
+<script src="/timing.js"></script>
 <script src="/board.js"></script>
 <script>
 const stage = document.getElementById("stage");
@@ -34,14 +35,12 @@ let transition = null;
 let motionGeneration = 0;
 let relayout = 0;
 
-const BOTTOM_TIMING = Object.freeze({
-  logo: 240, cover: 400, card: 600, firstPair: 100, pair: 60,
-  maxStagger: 560, exit: 320, easing: "cubic-bezier(0.22, 1, 0.36, 1)"
-});
-const SCOREBOARD_TIMING = Object.freeze({
-  card: 600, stagger: 120, maxStagger: 1200, exit: 320, exitStagger: 60, maxExitStagger: 600,
-  easing: "cubic-bezier(0.22, 1, 0.36, 1)"
-});
+// The lengths come from /timing.js, so the operator can change them from the
+// monitor and the next entrance uses them. The shape of the motion — easing,
+// offsets, the order pieces move in — is the design and stays here.
+const ENTRANCE_EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
+const bottomTiming = () => ({ ...fffTiming.bottomBar, easing: ENTRANCE_EASING });
+const scoreboardTiming = () => ({ ...fffTiming.scoreboard, easing: ENTRANCE_EASING });
 
 // The operator's press must never be the first time the browser hears about a
 // PNG. Every asset in the feed is fetched the moment the state arrives, and the
@@ -115,6 +114,8 @@ function refreshReveals() {
 }
 
 function animateBottom(entering, done = () => {}) {
+  // Taken once, so every piece of one entrance shares the same lengths.
+  const BOTTOM_TIMING = bottomTiming();
   const elements = [...board.querySelectorAll(".bottom-motion")];
   // Read before cancelling: an exit can interrupt any point of the entrance.
   const current = elements.map(element => {
@@ -217,6 +218,7 @@ function animateBottom(entering, done = () => {}) {
 // right in the same order. Only transform and opacity move, so the compositor
 // runs every frame; the saved placement stays on the outer piece.
 function animateScoreboard(entering, done = () => {}) {
+  const SCOREBOARD_TIMING = scoreboardTiming();
   const pieces = [...board.querySelectorAll(":scope > .piece")];
   const slots = pieces.map(piece => piece.firstElementChild);
   // board.js tags every card for its pop when the board is first built off
@@ -241,14 +243,20 @@ function animateScoreboard(entering, done = () => {}) {
     for (const cleanup of active.cleanups) cleanup();
     done();
   };
+  // The title is the board's furniture, not one of its rows: it enters with the
+  // first card instead of taking a place in the stagger, so adding it left
+  // every card's timing exactly where it was.
+  const rows = pieces.filter(piece => piece.dataset.target !== "heading").length;
   // Spacing shrinks for a long roster so the whole sequence keeps its length.
-  const spacing = (step, max) => slots.length > 1 ? Math.min(step, max / (slots.length - 1)) : 0;
+  const spacing = (step, max) => rows > 1 ? Math.min(step, max / (rows - 1)) : 0;
   const step = entering ? spacing(SCOREBOARD_TIMING.stagger, SCOREBOARD_TIMING.maxStagger)
     : spacing(SCOREBOARD_TIMING.exitStagger, SCOREBOARD_TIMING.maxExitStagger);
   const duration = entering ? SCOREBOARD_TIMING.card : SCOREBOARD_TIMING.exit;
   let deadline = 0;
+  let row = 0;
   slots.forEach((slot, index) => {
-    const piece = pieces[index], delay = index * step;
+    const piece = pieces[index];
+    const delay = piece.dataset.target === "heading" ? 0 : row++ * step;
     deadline = Math.max(deadline, delay + duration);
     const frames = entering
       ? [{ opacity: 0, transform: "translateX(-48px)" }, { opacity: 1, transform: "none" }]
@@ -278,7 +286,7 @@ function animateScoreboard(entering, done = () => {}) {
 // changed. A vote changes colours, not boxes.
 function layoutKey(view, mode) {
   return JSON.stringify([mode, view.layout, view.pieces, view.layers, view.cardTemplate,
-    view.logoTemplate, view.countTemplate, view.coverUrl,
+    view.headingTemplate, view.logoTemplate, view.countTemplate, view.coverUrl,
     (view.presidents || []).map(p => [p.id, p.cardUrl, p.bottomBarUrl, p.logoUrl])]);
 }
 
@@ -300,6 +308,7 @@ function prepare(state, mode) {
 
 function render(state) {
   lastState = state;
+  applyTiming(state.timing);
   warmAssets(state);
   const revealed = state.phase === "revealed";
   const mode = state.displayMode || "scoreboard";

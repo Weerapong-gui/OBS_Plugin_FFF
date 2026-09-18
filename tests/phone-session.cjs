@@ -8,7 +8,9 @@ const votes = new Map();
 let connections = 0;
 const screenshots = process.env.FFF_SCREENSHOT_DIR || '/private/tmp/fff-phone-review';
 let delayVote = false, releaseVote, voteReceived;
-const state = (name, vote = 'none') => ({ you: { name, school: 'สำนักทดสอบ', vote }, round: 3, phase: 'collecting', total: 2, voted: vote === 'none' ? 0 : 1 });
+let timing = null;
+const state = (name, vote = 'none') => ({ you: { name, school: 'สำนักทดสอบ', vote }, round: 3, phase: 'collecting', total: 2, voted: vote === 'none' ? 0 : 1,
+  ...(timing ? { timing } : {}) });
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname === '/api/events') {
@@ -28,8 +30,9 @@ const server = http.createServer(async (req, res) => {
     votes.set(data.token, data.color);
     res.end(JSON.stringify(state(data.token, data.color))); return;
   }
-  const file = url.pathname === '/app.css' ? 'app.css' : 'phone.html';
-  res.setHeader('Content-Type', file.endsWith('css') ? 'text/css' : 'text/html');
+  const file = url.pathname === '/app.css' ? 'app.css' : url.pathname === '/timing.js' ? 'timing.js' : 'phone.html';
+  res.setHeader('Content-Type', file.endsWith('css') ? 'text/css' :
+    file.endsWith('js') ? 'application/javascript' : 'text/html');
   res.end(fs.readFileSync(path.resolve(__dirname, '../data/web', file)));
 });
 (async () => {
@@ -111,6 +114,17 @@ const server = http.createServer(async (req, res) => {
     assert.ok(connections > previousConnections, 'SSE must reconnect');
     assert.equal(await page.$eval('#name', el => el.textContent), '222222');
     assert.equal(await page.$eval('#green', el => el.getAttribute('aria-pressed')), 'true');
+    // The flag buttons animate, so their length is the session's like any other.
+    const flagTransition = () => page.$eval('#green', el => getComputedStyle(el).transitionDuration);
+    const defaultFlag = await page.evaluate(() => FFF_TIMING_DEFAULTS.phone.flag);
+    assert.equal(await flagTransition(), `${defaultFlag / 1000}s, ${defaultFlag / 1000}s`,
+      'the flags open on the default length');
+    timing = { phone: { flag: 400 } };
+    for (const stream of streams) stream.write('data: ' + JSON.stringify(state('222222', votes.get('222222'))) + '\n\n');
+    await page.waitForFunction(() => fffTiming.phone.flag === 400);
+    assert.equal(await flagTransition(), '0.4s, 0.4s', 'and follow what the session says');
+    timing = null;
+
     for (const size of [{width:320,height:568},{width:667,height:375}]) {
       await page.setViewport(size);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
