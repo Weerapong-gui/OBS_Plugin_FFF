@@ -35,6 +35,14 @@ int main(int argc, char **argv)
 	      "cookie attributes");
 
 	check(classify("GET", QStringLiteral("/monitor")) == Endpoint::MonitorPage, "monitor page");
+	// /score shows the tally before it is on air, so it is admitted the same
+	// way. The server sends `path` back as the redirect's Location, which is
+	// only safe while these two exact literals are the whole of MonitorPage.
+	check(classify("GET", QStringLiteral("/score")) == Endpoint::MonitorPage, "score page");
+	check(classify("GET", QStringLiteral("/score/")) == Endpoint::Public &&
+		      classify("GET", QStringLiteral("/scoreboard")) == Endpoint::Public &&
+		      classify("POST", QStringLiteral("/score")) == Endpoint::Public,
+	      "only the exact GET /score is the score page");
 	for (const char *path : {"/api/events/overlay", "/api/monitor/access"})
 		check(classify("GET", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor reads");
 	for (const char *path : {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset",

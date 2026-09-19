@@ -113,6 +113,11 @@ public:
 	// The title above the Show Status stack: its box, its words and its type.
 	static bool validHeadingTemplate(const QJsonObject &value);
 	bool setHeadingTemplate(const QJsonObject &value);
+	// The /score page's own title and flag counters. They describe the same two
+	// shapes the Show Status title and the Bottom Bar counters do, so they reuse
+	// those validators rather than inventing a third and a fourth.
+	bool setScoreHeadingTemplate(const QJsonObject &value);
+	bool setScoreCountTemplate(const QJsonObject &value);
 	// A locally installed font family name, or empty for the page's own stack.
 	static bool validFontFamily(const QString &family);
 	static bool validHexColor(const QString &color);
@@ -131,6 +136,9 @@ public:
 			    const QString &mode = QStringLiteral("scoreboard"));
 
 	static bool validMode(const QString &mode);
+	// Which boards POST /api/template may describe. "score" is a page, not a
+	// board that goes on air, so it belongs here and never in validMode().
+	static bool validTemplateMode(const QString &mode);
 	bool showMode(const QString &mode);
 	// Take the stream back to blank without ending the round: the operator
 	// can put the same votes back up a moment later.
@@ -177,6 +185,10 @@ public:
 	// Writes PNG bytes into the cards directory and returns the stored name.
 	// Shared by the dock's file picker and the monitor's upload.
 	QString storeAsset(const QByteArray &png, const QString &kind);
+	// Where this plugin keeps everything of its own on this machine. Public
+	// because the hotkey bindings live beside session.json and there must be
+	// exactly one answer to where that is.
+	QString configDir() const;
 
 signals:
 	void changed();
@@ -186,7 +198,6 @@ signals:
 	void monitorAccessChanged();
 
 private:
-	QString configDir() const;
 	// Copies the session this plugin ships with into place, once, on a machine
 	// that has none of its own.
 	void seedFromBundle() const;
@@ -214,5 +225,7 @@ private:
 	QHash<QString, int> m_pieceLayers;
 	QJsonObject m_cardTemplate;
 	QJsonObject m_headingTemplate;
+	QJsonObject m_scoreHeadingTemplate;
+	QJsonObject m_scoreCountTemplate;
 	QJsonObject m_timing;
 };

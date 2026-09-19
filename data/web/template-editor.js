@@ -239,6 +239,11 @@
     for (const [weight, pattern] of STYLE_WEIGHTS) if (pattern.test(style)) return weight;
     return 400;
   }
+  // The /score panel picks a font the same way and must map a style name to a
+  // weight the same way, so the ladder and the mapping are shared rather than
+  // written out a second time and allowed to drift.
+  window.FFF_FONT_WEIGHTS = WEIGHTS;
+  window.fffWeightOfStyle = weightOf;
   function weightsFor(family) {
     const found = faceWeights.get(family);
     return found && found.size ? [...found].sort((a, b) => a - b) : WEIGHTS.map(([weight]) => weight);

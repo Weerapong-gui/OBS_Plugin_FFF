@@ -67,6 +67,28 @@ set_tests_properties(
   PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${Qt6_DIR}/../../../plugins"
 )
 
+# The hotkeys need the OBS hotkey system, which obs-hotkey-stubs.cpp stands in
+# for; fff-dock.cpp (the only file needing the frontend API) still stays out.
+add_executable(
+  hotkey-tests
+  hotkey-tests.cpp
+  obs-stubs.cpp
+  obs-hotkey-stubs.cpp
+  ../src/fff-hotkeys.cpp
+  ../src/fff-dock-live.cpp
+  ../src/fff-session.cpp
+  ../src/fff-http-server.cpp
+  ../src/fff-monitor-access.cpp
+  ../src/fff-asset-rendition.cpp
+)
+target_include_directories(hotkey-tests PRIVATE ../src "${OBS_INCLUDE_DIR}")
+target_link_libraries(hotkey-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Widgets)
+add_test(NAME hotkey-tests COMMAND hotkey-tests)
+set_tests_properties(
+  hotkey-tests
+  PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_PLUGIN_PATH=${Qt6_DIR}/../../../plugins"
+)
+
 add_executable(
   asset-rendition-tests
   asset-rendition-tests.cpp
