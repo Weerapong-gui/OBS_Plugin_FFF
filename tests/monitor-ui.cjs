@@ -10,10 +10,11 @@ const web = path.resolve(__dirname, "../data/web");
 const state = {
   phase: "collecting", round: 2, total: 3, voted: 1, displayMode: "scoreboard",
   layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {},
-  bottomBar: { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {} },
+  bottomBar: { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {}, logoPresidentId: "", logoRound: 1 },
   presidents: [0, 1, 2].map((i) => ({
     id: String(i), name: "นายก " + i, school: "สำนัก " + i, cardUrl: "",
-    vote: i === 0 ? "green" : "none", status: "waiting", statusUrl: ""
+    vote: i === 0 ? "green" : "none", status: "waiting", statusUrl: "",
+    logoRound2Url: i === 0 ? "data:image/png;base64,x" : ""
   }))
 };
 let accessStatus = 204;
@@ -61,7 +62,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ onAir: capabilityOnAir }));
     return;
   }
-  if (req.method === "POST" && (req.url === "/api/display" || req.url === "/api/round")) {
+  if (req.method === "POST" && ["/api/display", "/api/round", "/api/logo"].includes(req.url)) {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
@@ -313,6 +314,45 @@ async function main() {
     state.phase = "collecting"; state.displayMode = "scoreboard"; push();
     await page.reload({ waitUntil: "load" });
     console.log("PASS: the on-air buttons toggle, confirm twice and grey for a LAN operator");
+
+    // The centre logo and the vote list: the dock's live tab.
+    airRequests = [];
+    await page.evaluate(() => document.getElementById("tab-live").click());
+    await page.waitForFunction(() => !document.getElementById("panel-live").hidden);
+
+    assert.deepEqual(
+      await page.$$eval("#voteList li", (items) => items.map((li) => li.textContent)),
+      ["● เขียว · นายก 0", "○ ยังไม่กด · นายก 1", "○ ยังไม่กด · นายก 2"]);
+
+    assert.equal(await page.$eval("#logoRound1", (el) => el.getAttribute("aria-pressed")), "true");
+    const logoSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
+    await page.click("#logoRound2");
+    await logoSent;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { round: 2 } });
+
+    // Round 2 with no artwork behind it leaves the centre empty on air, so say so.
+    state.bottomBar.logoRound = 2;
+    state.bottomBar.logoPresidentId = "1";
+    push();
+    await page.waitForFunction(() => !document.getElementById("logoWarning").hidden);
+    assert.match(await page.$eval("#logoWarning", (el) => el.textContent), /สำนัก 1/);
+    state.bottomBar.logoPresidentId = "0";
+    push();
+    await page.waitForFunction(() => document.getElementById("logoWarning").hidden);
+
+    capabilityOnAir = false;
+    await page.reload({ waitUntil: "load" });
+    await page.evaluate(() => document.getElementById("tab-live").click());
+    await page.waitForFunction(() => document.getElementById("logoRound1").disabled);
+    assert.equal(await page.$eval("#logoSchool", (el) => el.disabled), true);
+    assert.equal(await page.$$eval("#voteList li", (items) => items.length), 3,
+      "a LAN operator still reads the votes");
+    capabilityOnAir = true;
+    console.log("PASS: the live tab picks the centre logo and lists who has voted");
+
+    state.bottomBar.logoRound = 1;
+    state.bottomBar.logoPresidentId = "";
+    push();
 
     // A revoked key is told apart from a dropped connection.
     accessStatus = 403;

@@ -80,6 +80,7 @@
     <button type="button" role="tab" id="tab-status-png" aria-controls="panel-status-png" aria-selected="false" tabindex="-1">PNG สถานะ</button>
     <button type="button" role="tab" id="tab-timing" aria-controls="panel-timing" aria-selected="false" tabindex="-1">จังหวะ</button>
     <button type="button" role="tab" id="tab-score" aria-controls="panel-score" aria-selected="false" tabindex="-1">หน้า Score</button>
+    <button type="button" role="tab" id="tab-live" aria-controls="panel-live" aria-selected="false" tabindex="-1">ไลฟ์</button>
   </div>
   <section id="panel-position" class="controls" role="tabpanel" aria-labelledby="tab-position">
     <div class="control-group" role="group" aria-label="ตำแหน่ง">
@@ -225,6 +226,19 @@
       <button id="scoreDefaults">คืนค่าเริ่มต้น</button>
     </div>
     <p id="scoreStatus" role="status"></p>
+  </section>
+  <section id="panel-live" class="controls" role="tabpanel" aria-labelledby="tab-live" hidden>
+    <div class="control-group" role="group" aria-label="โลโก้กลาง">
+      <span class="group-label">โลโก้กลาง</span>
+      <button id="logoRound1" aria-pressed="false">Round 1</button>
+      <button id="logoRound2" aria-pressed="false">Round 2</button>
+    </div>
+    <div class="control-group">
+      <label class="top-select">สำนัก <select id="logoSchool"></select></label>
+    </div>
+    <p id="logoWarning" class="hint" hidden></p>
+    <h3>ใครโหวตแล้ว</h3>
+    <ul id="voteList" class="vote-list"></ul>
   </section>
 </aside></div>
 
@@ -747,6 +761,7 @@ function render(incoming) {
 
   updateAirStatus({ status: statusEl, round: roundStatus, warning: airWarning }, incoming, editMode);
   paintAir();
+  paintLive();
 
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
@@ -1168,7 +1183,7 @@ async function sendAir(url, body) {
     saveStatus.textContent = "สั่งไม่สำเร็จ";
   } finally {
     clearTimeout(timer);
-    airBusy = false; paintAir();
+    airBusy = false; paintAir(); paintLive();
   }
 }
 
@@ -1186,9 +1201,56 @@ armConfirm(airEl("airNewRound"), () => sendAir("/api/round", { action: "clear" }
 
 fetch("/api/monitor/capabilities")
   .then((response) => response.json())
-  .then((data) => { onAir = data.onAir === true; paintAir(); })
-  .catch(() => { onAir = false; paintAir(); });
+  .then((data) => { onAir = data.onAir === true; paintAir(); paintLive(); })
+  .catch(() => { onAir = false; paintAir(); paintLive(); });
 paintAir();
+
+// ---------- the live tab: the centre logo and who has voted ----------------
+const VOTE_WORDS = { red: "แดง", green: "เขียว" };
+
+function paintLive() {
+  const state = sourceState;
+  if (!state) return;
+  const bottom = state.bottomBar || {};
+  const round = bottom.logoRound === 2 ? 2 : 1;
+  airEl("logoRound1").setAttribute("aria-pressed", String(round === 1));
+  airEl("logoRound2").setAttribute("aria-pressed", String(round === 2));
+  for (const id of ["logoRound1", "logoRound2", "logoSchool"]) {
+    airEl(id).disabled = !onAir || airBusy;
+    airEl(id).title = onAir ? "" : "ใช้ได้เฉพาะเครื่องที่รัน OBS";
+  }
+
+  // Rebuilding the list would close an open popup, so only a roster change does.
+  const presidents = state.presidents || [];
+  const select = airEl("logoSchool");
+  const signature = JSON.stringify(presidents.map((p) => [p.id, p.name, p.school]));
+  if (select.dataset.schools !== signature) {
+    select.dataset.schools = signature;
+    select.replaceChildren(new Option("ไม่เลือกโลโก้", ""),
+      ...presidents.map((p) => new Option(p.school || p.name, p.id)));
+  }
+  if (document.activeElement !== select) select.value = bottom.logoPresidentId || "";
+
+  // Round 2 with no artwork behind it leaves the centre of the bar empty on
+  // air, which is only visible once it is too late. Say it here instead.
+  const chosen = presidents.find((p) => p.id === bottom.logoPresidentId);
+  const missing = round === 2 && chosen && !chosen.logoRound2Url;
+  const warning = airEl("logoWarning");
+  warning.hidden = !missing;
+  warning.textContent = missing
+    ? `⚠ ${chosen.school || chosen.name} ยังไม่มี PNG ของ Round 2` : "";
+
+  airEl("voteList").replaceChildren(...presidents.map((president) => {
+    const item = document.createElement("li");
+    const word = VOTE_WORDS[president.vote] || "ยังไม่กด";
+    item.textContent = `${president.vote === "red" || president.vote === "green" ? "●" : "○"} ${word} · ${president.name || president.school}`;
+    return item;
+  }));
+}
+
+airEl("logoRound1").onclick = () => sendAir("/api/logo", { round: 1 });
+airEl("logoRound2").onclick = () => sendAir("/api/logo", { round: 2 });
+airEl("logoSchool").onchange = (event) => sendAir("/api/logo", { presidentId: event.target.value });
 
 fitCanvas();
 setInterval(flush, SAVE_RETRY_MS);

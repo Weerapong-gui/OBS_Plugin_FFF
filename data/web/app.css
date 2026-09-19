@@ -910,3 +910,10 @@ body.score {
   white-space: nowrap;
 }
 
+
+/* One row per president, the same words the dock's live tab uses. */
+.vote-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.vote-list li { padding: 6px 0; border-bottom: 1px solid var(--edge); }
+.vote-list li:last-child { border-bottom: 0; }
+#logoWarning { color: var(--amber); }
+#logoWarning[hidden] { display: none; }
