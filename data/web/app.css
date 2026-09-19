@@ -784,14 +784,14 @@ body.monitor {
 .monitor-top .piece-options button { min-height: 32px; padding: 6px 12px; border-radius: 8px;
   border: 1px solid var(--border); cursor: pointer; }
 .monitor-top .piece-options button:disabled { opacity: 0.45; cursor: not-allowed; }
-/* The on-air buttons must never sit beside the edit-mode toggles a few
-   elements earlier in this strip: both groups use the labels "Show Status"
-   and "BOTTOM BAR" and fill the selected one with var(--accent), so on a
-   wide monitor an operator could mistake the edit-mode selection for what's
-   actually airing (or vice versa). Force this group onto its own row. */
-#airControls { flex-basis: 100%; }
-#airControls button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent);
-  color: #0e1116; }
+/* The on-air buttons share the labels "Show Status" and "BOTTOM BAR" with
+   the edit-mode toggles a few elements earlier in this strip, so an aired
+   button must not be filled the same way as a selected edit-mode toggle.
+   Use --red, the same colour the dock uses for "on air" (see FffColor::kRed
+   in src/fff-dock-ui.h / src/fff-dock-live.cpp), so these buttons read as
+   "this is live" rather than being mistaken for the edit-mode selection. */
+#airControls button[aria-pressed="true"] { background: var(--red); border-color: var(--red);
+  color: #fff; }
 .air-warning { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber); color: #0e1116;
   font-weight: 700; }
 .air-warning[hidden] { display: none; }
