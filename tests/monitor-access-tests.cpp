@@ -43,7 +43,7 @@ int main(int argc, char **argv)
 		      classify("GET", QStringLiteral("/scoreboard")) == Endpoint::Public &&
 		      classify("POST", QStringLiteral("/score")) == Endpoint::Public,
 	      "only the exact GET /score is the score page");
-	for (const char *path : {"/api/events/overlay", "/api/monitor/access"})
+	for (const char *path : {"/api/events/overlay", "/api/monitor/access", "/api/monitor/capabilities"})
 		check(classify("GET", QString::fromLatin1(path)) == Endpoint::MonitorApi, "monitor reads");
 	for (const char *path : {"/api/layout", "/api/layer", "/api/operator/vote", "/api/status", "/api/asset",
 				 "/api/template", "/api/timing"})

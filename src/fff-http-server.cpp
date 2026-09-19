@@ -439,6 +439,16 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			send(socket, 204, "text/plain; charset=utf-8", QByteArray());
 			return;
 		}
+		if (path == QLatin1String("/api/monitor/capabilities")) {
+			// The page asks once, at load, whether the buttons that change
+			// what the stream shows are for it. Nothing secret rides here:
+			// it is the same loopback test readFrom() already made, said out
+			// loud so the page can grey a button rather than let an operator
+			// press it and watch nothing happen.
+			sendJson(socket, 200,
+				 socket->peerAddress().isLoopback() ? "{\"onAir\":true}" : "{\"onAir\":false}");
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
 			// Every flag before the reveal: this machine, or a LAN monitor
 			// holding the current key (see readFrom()).

@@ -63,7 +63,8 @@ Endpoint classify(const QByteArray &method, const QString &path)
 		// MonitorPage only for one of these two string literals.
 		if (path == QLatin1String("/monitor") || path == QLatin1String("/score"))
 			return Endpoint::MonitorPage;
-		if (path == QLatin1String("/api/events/overlay") || path == QLatin1String("/api/monitor/access"))
+		if (path == QLatin1String("/api/events/overlay") || path == QLatin1String("/api/monitor/access") ||
+		    path == QLatin1String("/api/monitor/capabilities"))
 			return Endpoint::MonitorApi;
 		return Endpoint::Public;
 	}
