@@ -199,6 +199,10 @@ static void testServer(FffSession &session, FffHttpServer &server)
 	      "the redirect hands over the cookie");
 	check(bodyOf(call("GET", host, "/monitor", cookie)) == "missing asset", "the cookie opens the monitor page");
 	check(statusOf(call("GET", host, "/api/monitor/access", cookie)) == 204, "the cookie passes the access probe");
+	check(bodyOf(call("GET", host, "/api/monitor/capabilities", cookie)) == "{\"onAir\":false}",
+	      "a LAN monitor is told it may not drive the stream");
+	check(bodyOf(call("GET", local, "/api/monitor/capabilities")) == "{\"onAir\":true}",
+	      "this machine is told it may");
 	check(statusOf(call("GET", host, "/api/monitor/access")) == 403, "the probe refuses strangers");
 	check(statusOf(call("POST", host, "/api/layout", cookie, R"({"target":"heading","reset":true})")) == 200,
 	      "the cookie saves layout");

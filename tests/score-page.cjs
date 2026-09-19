@@ -136,7 +136,7 @@ async function main() {
     assert.equal(state.phase, "collecting");
     setVotes(3, 2);
     await settled(score, 3, 2);
-    assert.equal(await score.evaluate(() => document.querySelector("#board").children.length), 4);
+    assert.equal(await score.evaluate(() => document.querySelector("#board").children.length), 3);
     console.log("PASS: flags are counted while the stream is still collecting");
 
     // Over live video the page cannot borrow a background, so every piece has
@@ -153,7 +153,7 @@ async function main() {
         return { background: style.backgroundColor, shadow: style.boxShadow };
       };
       return { heading: ofBefore("#heading"), red: of(".count-red"), green: of(".count-green"),
-        label: of(".count-red .count-label"), round: of("#round span") };
+        label: of(".count-red .count-label") };
     });
     for (const [name, plate] of Object.entries(plates)) {
       assert.notEqual(plate.background, "rgba(0, 0, 0, 0)", `${name} has a plate behind it`);
@@ -173,20 +173,6 @@ async function main() {
     assert.deepEqual(labels.green, { text: "เขียว", color: "rgb(33, 176, 74)" });
     console.log("PASS: each counter says which flag it counts");
 
-    // The round comes off the same state the tally does.
-    assert.equal(await score.$eval("#round span", (element) => element.textContent), "รอบ 1");
-    state.round = 4;
-    push();
-    await score.waitForFunction(() => document.querySelector("#round span").textContent === "รอบ 4",
-      { polling: 50 });
-    delete state.round;
-    push();
-    await score.waitForFunction(() => document.getElementById("round").hidden, { polling: 50 });
-    state.round = 1;
-    push();
-    await score.waitForFunction(() => !document.getElementById("round").hidden, { polling: 50 });
-    console.log("PASS: the round pill follows the session and goes away without one");
-
     // The colours are the counter template's, and the two counters sit apart
     // on the canvas rather than on top of each other.
     const boxes = await score.evaluate(() => {
@@ -198,7 +184,8 @@ async function main() {
         redColor: getComputedStyle(document.querySelector(".count-red .count-value")).color,
         greenColor: getComputedStyle(document.querySelector(".count-green .count-value")).color };
     });
-    assert.notDeepEqual(boxes.red, boxes.green);
+    // Green reads first, red second.
+    assert.ok(boxes.green.x < boxes.red.x, "green sits left of red");
     assert.equal(boxes.redColor, "rgb(226, 60, 60)");
     assert.equal(boxes.greenColor, "rgb(33, 176, 74)");
     console.log("PASS: the two counters keep their own place and colour");

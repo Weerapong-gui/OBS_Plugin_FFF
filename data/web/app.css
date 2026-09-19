@@ -784,6 +784,14 @@ body.monitor {
 .monitor-top .piece-options button { min-height: 32px; padding: 6px 12px; border-radius: 8px;
   border: 1px solid var(--border); cursor: pointer; }
 .monitor-top .piece-options button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* The on-air buttons share the labels "Show Status" and "BOTTOM BAR" with
+   the edit-mode toggles a few elements earlier in this strip, so an aired
+   button must not be filled the same way as a selected edit-mode toggle.
+   Use --red, the same colour the dock uses for "on air" (see FffColor::kRed
+   in src/fff-dock-ui.h / src/fff-dock-live.cpp), so these buttons read as
+   "this is live" rather than being mistaken for the edit-mode selection. */
+#airControls button[aria-pressed="true"] { background: var(--red); border-color: var(--red);
+  color: #fff; }
 .air-warning { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber); color: #0e1116;
   font-weight: 700; }
 .air-warning[hidden] { display: none; }
@@ -804,7 +812,7 @@ body.monitor {
 .side-panel .template-panel { padding: 0; background: none; border: 0; border-radius: 0; }
 .side-panel .status-assets { margin-top: 0; }
 .status-assets input:disabled, .status-assets button:disabled { opacity: 0.45; cursor: not-allowed; }
-#resetAll.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }
+#resetAll.confirm-armed, #airNewRound.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }
 
 /* ---------- score: the flag tally, counted live on its own canvas --------- */
 
@@ -869,7 +877,8 @@ body.score {
    is why one box can describe both without them landing on each other. The
    plate goes on the card rather than on that box, so moving the digit cannot
    drag the plate off with it. 660 and 1020 put the pair under the title's own
-   600px width with a gap wide enough to read as two things. */
+   600px width with a gap wide enough to read as two things. Green reads first,
+   the way the flags are called. */
 .score .count-card {
   position: absolute;
   top: 470px;
@@ -879,8 +888,8 @@ body.score {
   background: var(--score-plate);
   box-shadow: inset 0 0 0 4px currentColor, var(--score-lift);
 }
-.score .count-red { left: 660px; color: var(--red); }
-.score .count-green { left: 1020px; color: var(--green); }
+.score .count-green { left: 660px; color: var(--green); }
+.score .count-red { left: 1020px; color: var(--red); }
 /* The rim is drawn inside the box rather than as a border: a 4px border would
    shrink the card to 232px and the template's own 240px box would hang out. */
 
@@ -903,25 +912,10 @@ body.score {
   white-space: nowrap;
 }
 
-/* Above the title, so the group reads round, title, tally. A full-width strip
-   that centres its own pill, which keeps the pill centred on the canvas no
-   matter how long the round number gets. It clears the title plate, which
-   reaches 16px above the title's own box at the default y of 300. */
-.score .round-pill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 206px;
-  text-align: center;
-}
-.score .round-pill span {
-  display: inline-block;
-  padding: 11px 30px;
-  border-radius: 999px;
-  background: var(--score-plate);
-  box-shadow: inset 0 0 0 1px var(--edge), 0 6px 24px rgba(0, 0, 0, 0.45);
-  color: var(--text);
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1;
-}
+
+/* One row per president, the same words the dock's live tab uses. */
+.vote-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.vote-list li { padding: 6px 0; border-bottom: 1px solid var(--edge); }
+.vote-list li:last-child { border-bottom: 0; }
+#logoWarning { color: var(--amber); }
+#logoWarning[hidden] { display: none; }

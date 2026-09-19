@@ -439,6 +439,16 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			send(socket, 204, "text/plain; charset=utf-8", QByteArray());
 			return;
 		}
+		if (path == QLatin1String("/api/monitor/capabilities")) {
+			// The page asks once, at load, whether the buttons that change
+			// what the stream shows are for it. Nothing secret rides here:
+			// it is the same loopback test readFrom() already made, said out
+			// loud so the page can grey a button rather than let an operator
+			// press it and watch nothing happen.
+			sendJson(socket, 200,
+				 socket->peerAddress().isLoopback() ? "{\"onAir\":true}" : "{\"onAir\":false}");
+			return;
+		}
 		if (path == QLatin1String("/api/events/overlay")) {
 			// Every flag before the reveal: this machine, or a LAN monitor
 			// holding the current key (see readFrom()).
@@ -473,18 +483,55 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 	} else if (method == "POST") {
 		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo")) {
 			const auto request = QJsonDocument::fromJson(body).object();
-			const QString value = request.value(path == QLatin1String("/api/display")
-								    ? QStringLiteral("mode")
-								    : QStringLiteral("presidentId"))
-						      .toString();
-			if ((path == QLatin1String("/api/display") && !FffSession::validMode(value)) ||
-			    (path == QLatin1String("/api/logo") && !value.isEmpty() &&
-			     !m_session->presidentById(value))) {
+			const bool display = path == QLatin1String("/api/display");
+			// Taking the board down is the one display change validMode()
+			// cannot express, and the logo's round is the one logo change
+			// presidentId cannot. Each rides its own field so a request that
+			// worked before works exactly the same way now; carrying both
+			// fields is a caller that has not decided what it wants.
+			if (display && request.contains(QStringLiteral("hide"))) {
+				if (request.contains(QStringLiteral("mode")) ||
+				    !request.value(QStringLiteral("hide")).toBool()) {
+					sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
+					return;
+				}
+				const bool saved = m_session->hideDisplay();
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			if (!display && request.contains(QStringLiteral("round"))) {
+				const int round = request.value(QStringLiteral("round")).toInt();
+				if (request.contains(QStringLiteral("presidentId")) || (round != 1 && round != 2)) {
+					sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
+					return;
+				}
+				const bool saved = m_session->setLogoRound(round);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			const QString value =
+				request.value(display ? QStringLiteral("mode") : QStringLiteral("presidentId"))
+					.toString();
+			if ((display && !FffSession::validMode(value)) ||
+			    (!display && !value.isEmpty() && !m_session->presidentById(value))) {
 				sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
 				return;
 			}
-			const bool saved = path == QLatin1String("/api/display") ? m_session->showMode(value)
-										 : m_session->setLogoPresident(value);
+			const bool saved = display ? m_session->showMode(value) : m_session->setLogoPresident(value);
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
+		if (path == QLatin1String("/api/round")) {
+			const auto request = QJsonDocument::fromJson(body).object();
+			// Named rather than implied: a stray empty POST must never be
+			// able to throw a round of votes away.
+			if (request.value(QStringLiteral("action")).toString() != QLatin1String("clear")) {
+				sendJson(socket, 400, "{\"error\":\"invalid action\"}");
+				return;
+			}
+			const bool saved = m_session->clearRound();
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
@@ -896,7 +943,8 @@ void FffHttpServer::sendDenied(QTcpSocket *socket, const QString &path, bool del
 	const auto reply = [this, path](QTcpSocket *target) {
 		if (path == QLatin1String("/monitor") || path == QLatin1String("/score"))
 			send(target, 403, "text/html; charset=utf-8", monitorDeniedPage());
-		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
+		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo") ||
+			 path == QLatin1String("/api/round"))
 			sendJson(target, 403, "{\"error\":\"local only\"}");
 		else
 			send(target, 403, "text/plain; charset=utf-8", deniedText(path));

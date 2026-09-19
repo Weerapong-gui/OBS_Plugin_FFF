@@ -11,7 +11,6 @@
      arrive, so nothing here reads phase or displayMode. That is the whole
      difference from /overlay, which waits for the operator's press. -->
 <div id="board" class="board">
-  <div id="round" class="round-pill" hidden><span></span></div>
   <div class="piece heading-piece"><div id="heading" class="heading-text"></div></div>
   <div class="piece count-card count-red"><div class="count-value"></div><div class="count-label">แดง</div></div>
   <div class="piece count-card count-green"><div class="count-value"></div><div class="count-label">เขียว</div></div>
@@ -21,8 +20,6 @@
 <script src="/board.js"></script>
 <script>
 const heading = document.getElementById("heading");
-const roundPill = document.getElementById("round");
-const roundText = roundPill.firstElementChild;
 const counts = { red: document.querySelector(".count-red .count-value"),
   green: document.querySelector(".count-green .count-value") };
 
@@ -30,11 +27,6 @@ function render(state) {
   // The lengths of the count roll come from the session, the same as on air.
   applyTiming(state.timing);
   applyHeadingTemplate(heading, scoreHeadingOf(state.scoreHeadingTemplate));
-  // A state without a round is not a round zero; the pill goes away instead.
-  const hasRound = Number.isFinite(state.round);
-  roundPill.hidden = !hasRound;
-  if (hasRound)
-    roundText.textContent = "รอบ " + state.round;
   const count = scoreCountOf(state.scoreCountTemplate);
   const presidents = state.presidents || [];
   for (const vote of ["red", "green"]) {

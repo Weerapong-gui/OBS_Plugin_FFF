@@ -596,6 +596,21 @@ queue ข้ามจากเธรด hotkey ของ libobs มาที่�
 ctest --test-dir /private/tmp/fff-layout-native -R "hotkey-tests|dock-tests" --output-on-failure
 ```
 
+## แถบไลฟ์บนหน้า Monitor
+
+`POST /api/display` รับ `{"hide":true}` เพิ่มจาก `{"mode":…}` และ `POST /api/logo` รับ
+`{"round":1|2}` เพิ่มจาก `{"presidentId":…}` — หนึ่งคำขอมีได้เจตนาเดียว ส่งสองฟิลด์พร้อมกัน
+ตอบ 400 `POST /api/round {"action":"clear"}` เป็น local-only เหมือนสองเส้นนั้น และปฏิเสธ
+คำขอที่ไม่ได้ระบุ action เพื่อไม่ให้ POST ว่าง ๆ ล้างรอบโดยบังเอิญ
+
+`GET /api/monitor/capabilities` ตอบ `{"onAir":true|false}` ตามว่าผู้เรียกเป็น loopback
+หรือไม่ หน้าเพจเรียกครั้งเดียวตอนโหลดเพื่อตัดสินว่าจะเปิดหรือปิดปุ่ม ไม่ได้ poll
+
+`monitor-ui.cjs` ครอบคลุม: ปุ่มโหมดเป็น toggle (โหมดที่ออกอากาศอยู่ส่ง `{"hide":true}`),
+`↻ เริ่มรอบใหม่` กดครั้งเดียวไม่ส่งอะไร, `onAir:false` ทำให้ปุ่มทั้งสี่กับตัวเลือกโลโก้
+เป็นสีเทาพร้อม title, รายการคนโหวตยังอ่านได้จาก LAN, คำเตือน Round 2 โผล่เฉพาะเมื่อสำนัก
+ที่เลือกไม่มี `logoRound2Url` และหน้าต่าง 900px ยังไม่มี horizontal scroll
+
 ## Dock panels
 
 `dock-tests` builds the dock panels without OBS (`src/fff-dock.cpp`, the only

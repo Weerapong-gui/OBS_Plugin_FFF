@@ -10,16 +10,19 @@ const web = path.resolve(__dirname, "../data/web");
 const state = {
   phase: "collecting", round: 2, total: 3, voted: 1, displayMode: "scoreboard",
   layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {},
-  bottomBar: { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {} },
+  bottomBar: { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {}, logoPresidentId: "", logoRound: 1 },
   presidents: [0, 1, 2].map((i) => ({
     id: String(i), name: "นายก " + i, school: "สำนัก " + i, cardUrl: "",
-    vote: i === 0 ? "green" : "none", status: "waiting", statusUrl: ""
+    vote: i === 0 ? "green" : "none", status: "waiting", statusUrl: "",
+    logoRound2Url: i === 0 ? "data:image/png;base64,x" : ""
   }))
 };
 let accessStatus = 204;
 let layoutRequests = [];
 let timingRequests = [];
 let timingStatusCode = 200;
+let capabilityOnAir = true;
+let airRequests = [];
 const streams = new Set();
 const push = () => { for (const res of streams) res.write(`data: ${JSON.stringify(state)}\n\n`); };
 
@@ -49,6 +52,21 @@ const server = http.createServer((req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       layoutRequests.push(JSON.parse(body));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  if (req.url === "/api/monitor/capabilities") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ onAir: capabilityOnAir }));
+    return;
+  }
+  if (req.method === "POST" && ["/api/display", "/api/round", "/api/logo"].includes(req.url)) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      airRequests.push({ url: req.url, body: JSON.parse(body) });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end('{"ok":true}');
     });
@@ -243,6 +261,134 @@ async function main() {
     await page.click("#timingCancel");
     delete state.timing; push();
     await page.click("#tab-position");
+
+    // The on-air buttons: the dock's toggles, in the strip that never scrolls.
+    airRequests = [];
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => !document.getElementById("airScoreboard").disabled);
+    assert.equal(await page.$eval("#airBottomBar", (el) => el.getAttribute("aria-pressed")), "false");
+
+    // Awaiting the real response keeps the handshake out of the page: no
+    // test-only global lives in code that ships.
+    const sent = (suffix) => page.waitForResponse((res) => res.url().endsWith(suffix));
+
+    let settled = sent("/api/display");
+    await page.click("#airBottomBar");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { mode: "bottomBar" } });
+
+    // With that mode on air, the same button asks for the board to come down.
+    state.phase = "revealed"; state.displayMode = "bottomBar"; push();
+    await page.waitForFunction(() =>
+      document.getElementById("airBottomBar").getAttribute("aria-pressed") === "true");
+    settled = sent("/api/display");
+    await page.click("#airBottomBar");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
+
+    settled = sent("/api/display");
+    await page.click("#airHide");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
+
+    // Ending a round asks twice, the way resetting every placement does.
+    const before = airRequests.length;
+    await page.click("#airNewRound");
+    await page.waitForFunction(() =>
+      document.getElementById("airNewRound").textContent === "กดอีกครั้งเพื่อล้างรอบ");
+    assert.equal(airRequests.length, before, "one press only arms the button");
+    settled = sent("/api/round");
+    await page.click("#airNewRound");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/round", body: { action: "clear" } });
+
+    // A LAN operator sees the buttons and is told why they do nothing.
+    capabilityOnAir = false;
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => document.getElementById("airScoreboard").disabled);
+    for (const id of ["airScoreboard", "airBottomBar", "airHide", "airNewRound"]) {
+      assert.equal(await page.$eval("#" + id, (el) => el.disabled), true, id + " is disabled");
+      assert.match(await page.$eval("#" + id, (el) => el.title), /เครื่องที่รัน OBS/);
+    }
+    capabilityOnAir = true;
+    state.phase = "collecting"; state.displayMode = "scoreboard"; push();
+    await page.reload({ waitUntil: "load" });
+    console.log("PASS: the on-air buttons toggle, confirm twice and grey for a LAN operator");
+
+    // The centre logo and the vote list: the dock's live tab.
+    airRequests = [];
+    await page.evaluate(() => document.getElementById("tab-live").click());
+    await page.waitForFunction(() => !document.getElementById("panel-live").hidden);
+
+    assert.deepEqual(
+      await page.$$eval("#voteList li", (items) => items.map((li) => li.textContent)),
+      ["● เขียว · นายก 0", "○ ยังไม่กด · นายก 1", "○ ยังไม่กด · นายก 2"]);
+
+    // The school list is built from the roster, not hard-coded.
+    assert.deepEqual(
+      await page.$$eval("#logoSchool option", (opts) => opts.map((o) => [o.value, o.textContent])),
+      [["", "ไม่เลือกโลโก้"], ["0", "สำนัก 0"], ["1", "สำนัก 1"], ["2", "สำนัก 2"]]);
+
+    assert.equal(await page.$eval("#logoRound1", (el) => el.getAttribute("aria-pressed")), "true");
+    const logoSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
+    await page.click("#logoRound2");
+    await logoSent;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { round: 2 } });
+
+    // Picking a school sends its id, the same way the round buttons do.
+    const schoolSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
+    await page.select("#logoSchool", "1");
+    await schoolSent;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { presidentId: "1" } });
+
+    // The select follows the session once it is not the operator's own popup.
+    await page.evaluate(() => document.getElementById("logoSchool").blur());
+    state.bottomBar.logoPresidentId = "2";
+    push();
+    await page.waitForFunction(() => document.getElementById("logoSchool").value === "2");
+
+    // An open select is not reset out from under the operator by a frame that
+    // does not touch the roster. "โหวตแล้ว" moving on is the same synchronous
+    // paint as the select, so waiting for it proves the frame was processed
+    // without timing the select itself.
+    await page.focus("#logoSchool");
+    state.voted = 2;
+    state.bottomBar.logoPresidentId = "0";
+    push();
+    await page.waitForFunction(() => document.getElementById("roundStatus").textContent.includes("โหวตแล้ว 2/"));
+    assert.equal(await page.$eval("#logoSchool", (el) => el.value), "2",
+      "a focused select keeps its value even though the session moved on");
+    await page.evaluate(() => document.getElementById("logoSchool").blur());
+    state.voted = 1;
+    state.bottomBar.logoPresidentId = "0";
+    push();
+
+    // Round 2 with no artwork behind it leaves the centre empty on air, so say so.
+    state.bottomBar.logoRound = 2;
+    state.bottomBar.logoPresidentId = "1";
+    push();
+    await page.waitForFunction(() => !document.getElementById("logoWarning").hidden);
+    assert.match(await page.$eval("#logoWarning", (el) => el.textContent), /สำนัก 1/);
+    state.bottomBar.logoPresidentId = "0";
+    push();
+    await page.waitForFunction(() => document.getElementById("logoWarning").hidden);
+
+    capabilityOnAir = false;
+    await page.reload({ waitUntil: "load" });
+    await page.evaluate(() => document.getElementById("tab-live").click());
+    await page.waitForFunction(() => document.getElementById("logoRound1").disabled);
+    for (const id of ["logoRound1", "logoRound2", "logoSchool"]) {
+      assert.equal(await page.$eval("#" + id, (el) => el.disabled), true, id + " is disabled");
+      assert.match(await page.$eval("#" + id, (el) => el.title), /เครื่องที่รัน OBS/);
+    }
+    assert.equal(await page.$$eval("#voteList li", (items) => items.length), 3,
+      "a LAN operator still reads the votes");
+    capabilityOnAir = true;
+    console.log("PASS: the live tab picks the centre logo and lists who has voted");
+
+    state.bottomBar.logoRound = 1;
+    state.bottomBar.logoPresidentId = "";
+    push();
 
     // A revoked key is told apart from a dropped connection.
     accessStatus = 403;
