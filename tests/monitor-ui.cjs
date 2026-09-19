@@ -324,11 +324,44 @@ async function main() {
       await page.$$eval("#voteList li", (items) => items.map((li) => li.textContent)),
       ["● เขียว · นายก 0", "○ ยังไม่กด · นายก 1", "○ ยังไม่กด · นายก 2"]);
 
+    // The school list is built from the roster, not hard-coded.
+    assert.deepEqual(
+      await page.$$eval("#logoSchool option", (opts) => opts.map((o) => [o.value, o.textContent])),
+      [["", "ไม่เลือกโลโก้"], ["0", "สำนัก 0"], ["1", "สำนัก 1"], ["2", "สำนัก 2"]]);
+
     assert.equal(await page.$eval("#logoRound1", (el) => el.getAttribute("aria-pressed")), "true");
     const logoSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
     await page.click("#logoRound2");
     await logoSent;
     assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { round: 2 } });
+
+    // Picking a school sends its id, the same way the round buttons do.
+    const schoolSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
+    await page.select("#logoSchool", "1");
+    await schoolSent;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { presidentId: "1" } });
+
+    // The select follows the session once it is not the operator's own popup.
+    await page.evaluate(() => document.getElementById("logoSchool").blur());
+    state.bottomBar.logoPresidentId = "2";
+    push();
+    await page.waitForFunction(() => document.getElementById("logoSchool").value === "2");
+
+    // An open select is not reset out from under the operator by a frame that
+    // does not touch the roster. "โหวตแล้ว" moving on is the same synchronous
+    // paint as the select, so waiting for it proves the frame was processed
+    // without timing the select itself.
+    await page.focus("#logoSchool");
+    state.voted = 2;
+    state.bottomBar.logoPresidentId = "0";
+    push();
+    await page.waitForFunction(() => document.getElementById("roundStatus").textContent.includes("โหวตแล้ว 2/"));
+    assert.equal(await page.$eval("#logoSchool", (el) => el.value), "2",
+      "a focused select keeps its value even though the session moved on");
+    await page.evaluate(() => document.getElementById("logoSchool").blur());
+    state.voted = 1;
+    state.bottomBar.logoPresidentId = "0";
+    push();
 
     // Round 2 with no artwork behind it leaves the centre empty on air, so say so.
     state.bottomBar.logoRound = 2;
@@ -344,7 +377,10 @@ async function main() {
     await page.reload({ waitUntil: "load" });
     await page.evaluate(() => document.getElementById("tab-live").click());
     await page.waitForFunction(() => document.getElementById("logoRound1").disabled);
-    assert.equal(await page.$eval("#logoSchool", (el) => el.disabled), true);
+    for (const id of ["logoRound1", "logoRound2", "logoSchool"]) {
+      assert.equal(await page.$eval("#" + id, (el) => el.disabled), true, id + " is disabled");
+      assert.match(await page.$eval("#" + id, (el) => el.title), /เครื่องที่รัน OBS/);
+    }
     assert.equal(await page.$$eval("#voteList li", (items) => items.length), 3,
       "a LAN operator still reads the votes");
     capabilityOnAir = true;

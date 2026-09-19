@@ -1169,7 +1169,7 @@ function paintAir() {
 
 async function sendAir(url, body) {
   if (!onAir || airBusy) return;
-  airBusy = true; paintAir();
+  airBusy = true; paintAir(); paintLive();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
   try {
