@@ -513,6 +513,18 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}
+		if (path == QLatin1String("/api/round")) {
+			const auto request = QJsonDocument::fromJson(body).object();
+			// Named rather than implied: a stray empty POST must never be
+			// able to throw a round of votes away.
+			if (request.value(QStringLiteral("action")).toString() != QLatin1String("clear")) {
+				sendJson(socket, 400, "{\"error\":\"invalid action\"}");
+				return;
+			}
+			const bool saved = m_session->clearRound();
+			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+			return;
+		}
 		if (path == QLatin1String("/api/template")) {
 			auto value = QJsonDocument::fromJson(body).object();
 			const QString mode = value.take(QStringLiteral("mode")).toString(QStringLiteral("scoreboard"));
@@ -921,7 +933,8 @@ void FffHttpServer::sendDenied(QTcpSocket *socket, const QString &path, bool del
 	const auto reply = [this, path](QTcpSocket *target) {
 		if (path == QLatin1String("/monitor") || path == QLatin1String("/score"))
 			send(target, 403, "text/html; charset=utf-8", monitorDeniedPage());
-		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
+		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo") ||
+			 path == QLatin1String("/api/round"))
 			sendJson(target, 403, "{\"error\":\"local only\"}");
 		else
 			send(target, 403, "text/plain; charset=utf-8", deniedText(path));

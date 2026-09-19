@@ -268,6 +268,22 @@ int main(int argc, char **argv)
 		      session.logoPresidentId() == QLatin1String("one"),
 	      "choosing a school still works");
 	check(post(R"({"round":1})", QStringLiteral("logo")) == 200 && session.logoRound() == 1, "back to round 1");
+
+	// Ending a round is the dock's most destructive button. The confirmation
+	// belongs to whichever UI asks; the route only refuses a request that did
+	// not say plainly what it wanted.
+	{
+		check(session.setVote(QStringLiteral("one"), FffVote::Green), "a vote to clear");
+		const int roundBefore = session.round();
+		check(post(R"({})", QStringLiteral("round")) == 400 && session.round() == roundBefore &&
+			      session.votedCount() == 1,
+		      "an empty request never ends a round");
+		check(post(R"({"action":"reset"})", QStringLiteral("round")) == 400 && session.round() == roundBefore,
+		      "only the named action clears");
+		check(post(R"({"action":"clear"})", QStringLiteral("round")) == 200 &&
+			      session.round() == roundBefore + 1 && session.votedCount() == 0,
+		      "the round is cleared and the next one begins");
+	}
 	{
 		FffSession reopenedScore;
 		reopenedScore.load();

@@ -75,7 +75,8 @@ Endpoint classify(const QByteArray &method, const QString &path)
 			QStringLiteral("/api/timing")};
 		if (monitorWrites.contains(path))
 			return Endpoint::MonitorApi;
-		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
+		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo") ||
+		    path == QLatin1String("/api/round"))
 			return Endpoint::LocalOnly;
 	}
 	return Endpoint::Public;
