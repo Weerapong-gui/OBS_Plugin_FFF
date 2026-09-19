@@ -20,6 +20,8 @@ let accessStatus = 204;
 let layoutRequests = [];
 let timingRequests = [];
 let timingStatusCode = 200;
+let capabilityOnAir = true;
+let airRequests = [];
 const streams = new Set();
 const push = () => { for (const res of streams) res.write(`data: ${JSON.stringify(state)}\n\n`); };
 
@@ -49,6 +51,21 @@ const server = http.createServer((req, res) => {
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
       layoutRequests.push(JSON.parse(body));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end('{"ok":true}');
+    });
+    return;
+  }
+  if (req.url === "/api/monitor/capabilities") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ onAir: capabilityOnAir }));
+    return;
+  }
+  if (req.method === "POST" && (req.url === "/api/display" || req.url === "/api/round")) {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      airRequests.push({ url: req.url, body: JSON.parse(body) });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end('{"ok":true}');
     });
@@ -243,6 +260,57 @@ async function main() {
     await page.click("#timingCancel");
     delete state.timing; push();
     await page.click("#tab-position");
+
+    // The on-air buttons: the dock's toggles, in the strip that never scrolls.
+    airRequests = [];
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => !document.getElementById("airScoreboard").disabled);
+    assert.equal(await page.$eval("#airBottomBar", (el) => el.getAttribute("aria-pressed")), "false");
+
+    // Awaiting the real response keeps the handshake out of the page: no
+    // test-only global lives in code that ships.
+    const sent = (suffix) => page.waitForResponse((res) => res.url().endsWith(suffix));
+
+    let settled = sent("/api/display");
+    await page.click("#airBottomBar");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { mode: "bottomBar" } });
+
+    // With that mode on air, the same button asks for the board to come down.
+    state.phase = "revealed"; state.displayMode = "bottomBar"; push();
+    await page.waitForFunction(() =>
+      document.getElementById("airBottomBar").getAttribute("aria-pressed") === "true");
+    settled = sent("/api/display");
+    await page.click("#airBottomBar");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
+
+    settled = sent("/api/display");
+    await page.click("#airHide");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
+
+    // Ending a round asks twice, the way resetting every placement does.
+    const before = airRequests.length;
+    await page.click("#airNewRound");
+    assert.equal(airRequests.length, before, "one press only arms the button");
+    settled = sent("/api/round");
+    await page.click("#airNewRound");
+    await settled;
+    assert.deepEqual(airRequests.at(-1), { url: "/api/round", body: { action: "clear" } });
+
+    // A LAN operator sees the buttons and is told why they do nothing.
+    capabilityOnAir = false;
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => document.getElementById("airScoreboard").disabled);
+    for (const id of ["airScoreboard", "airBottomBar", "airHide", "airNewRound"]) {
+      assert.equal(await page.$eval("#" + id, (el) => el.disabled), true, id + " is disabled");
+      assert.match(await page.$eval("#" + id, (el) => el.title), /เครื่องที่รัน OBS/);
+    }
+    capabilityOnAir = true;
+    state.phase = "collecting"; push();
+    await page.reload({ waitUntil: "load" });
+    console.log("PASS: the on-air buttons toggle, confirm twice and grey for a LAN operator");
 
     // A revoked key is told apart from a dropped connection.
     accessStatus = 403;

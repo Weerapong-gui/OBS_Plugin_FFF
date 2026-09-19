@@ -36,6 +36,13 @@
         <button class="status-waiting" data-status="waiting" disabled title="เลือกการ์ดก่อน">WAITING</button>
       </span>
     </div>
+    <div id="airControls" class="piece-options" role="group" aria-label="ออกอากาศ">
+      <span class="group-label">ออกอากาศ</span>
+      <button id="airScoreboard" aria-pressed="false">Show Status</button>
+      <button id="airBottomBar" aria-pressed="false">BOTTOM BAR</button>
+      <button id="airHide">■ ซ่อนจอ</button>
+      <button id="airNewRound">↻ เริ่มรอบใหม่</button>
+    </div>
   </div>
   <div id="airWarning" class="air-warning" role="alert" hidden>⚠ กำลังแก้โหมดที่ออกอากาศอยู่ — ย้าย/เปลี่ยนธง คนดูเห็นทันที</div>
 </header>
@@ -739,6 +746,7 @@ function render(incoming) {
   lastPhase = state.phase;
 
   updateAirStatus({ status: statusEl, round: roundStatus, warning: airWarning }, incoming, editMode);
+  paintAir();
 
   // Never blanks: this is what the operator watches while the stream is clean.
   renderBoard(board, state, { revealed: revealed, showVotes: true, justRevealed: justRevealed });
@@ -1122,6 +1130,65 @@ scoreEl("scoreDefaults").onclick = () => {
 };
 resetScoreDraft();
 paintScore();
+
+// ---------- the on-air buttons: the dock's live bar, in the pinned strip ----
+// The page never paints an outcome it only asked for. A press sends the
+// request and the next SSE frame is what moves the buttons, so what is on
+// screen here and what is on the stream cannot drift apart.
+let onAir = false;
+let airBusy = false;
+const AIR_BUTTONS = ["airScoreboard", "airBottomBar", "airHide", "airNewRound"];
+const airEl = (id) => document.getElementById(id);
+
+function paintAir() {
+  const revealed = sourceState && sourceState.phase === "revealed";
+  const aired = revealed ? sourceState.displayMode : null;
+  airEl("airScoreboard").setAttribute("aria-pressed", String(aired === "scoreboard"));
+  airEl("airBottomBar").setAttribute("aria-pressed", String(aired === "bottomBar"));
+  for (const id of AIR_BUTTONS) {
+    const button = airEl(id);
+    button.disabled = !onAir || airBusy;
+    button.title = onAir ? "" : "ใช้ได้เฉพาะเครื่องที่รัน OBS";
+  }
+}
+
+async function sendAir(url, body) {
+  if (!onAir || airBusy) return;
+  airBusy = true; paintAir();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body), signal: controller.signal });
+    if (!response.ok) throw new Error("refused");
+    // Nothing is written on success: the next SSE frame is the answer, and
+    // saveStatus belongs to the layout save pump.
+  } catch (error) {
+    saveStatus.textContent = "สั่งไม่สำเร็จ";
+  } finally {
+    clearTimeout(timer);
+    airBusy = false; paintAir();
+  }
+}
+
+// A mode already on air comes down; any other press puts one up. Same rule as
+// FffLivePanel::toggleMode().
+function pressAirMode(mode) {
+  const live = sourceState && sourceState.phase === "revealed" && sourceState.displayMode === mode;
+  sendAir("/api/display", live ? { hide: true } : { mode: mode });
+}
+airEl("airScoreboard").onclick = () => pressAirMode("scoreboard");
+airEl("airBottomBar").onclick = () => pressAirMode("bottomBar");
+airEl("airHide").onclick = () => sendAir("/api/display", { hide: true });
+armConfirm(airEl("airNewRound"), () => sendAir("/api/round", { action: "clear" }),
+  { armedLabel: "กดอีกครั้งเพื่อล้างรอบ" });
+
+fetch("/api/monitor/capabilities")
+  .then((response) => response.json())
+  .then((data) => { onAir = data.onAir === true; paintAir(); })
+  .catch(() => { onAir = false; paintAir(); });
+paintAir();
 
 fitCanvas();
 setInterval(flush, SAVE_RETRY_MS);

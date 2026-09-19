@@ -784,6 +784,12 @@ body.monitor {
 .monitor-top .piece-options button { min-height: 32px; padding: 6px 12px; border-radius: 8px;
   border: 1px solid var(--border); cursor: pointer; }
 .monitor-top .piece-options button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* The on-air buttons sit in the strip that never scrolls away, for the same
+   reason the dock keeps its live bar above the tabs. They wrap rather than
+   widen: a 900px window must still have no horizontal scroll. */
+#airControls { flex-wrap: wrap; }
+#airControls button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent);
+  color: #0e1116; }
 .air-warning { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--amber); color: #0e1116;
   font-weight: 700; }
 .air-warning[hidden] { display: none; }
