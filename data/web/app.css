@@ -869,7 +869,8 @@ body.score {
    is why one box can describe both without them landing on each other. The
    plate goes on the card rather than on that box, so moving the digit cannot
    drag the plate off with it. 660 and 1020 put the pair under the title's own
-   600px width with a gap wide enough to read as two things. */
+   600px width with a gap wide enough to read as two things. Green reads first,
+   the way the flags are called. */
 .score .count-card {
   position: absolute;
   top: 470px;
@@ -879,8 +880,8 @@ body.score {
   background: var(--score-plate);
   box-shadow: inset 0 0 0 4px currentColor, var(--score-lift);
 }
-.score .count-red { left: 660px; color: var(--red); }
-.score .count-green { left: 1020px; color: var(--green); }
+.score .count-green { left: 660px; color: var(--green); }
+.score .count-red { left: 1020px; color: var(--red); }
 /* The rim is drawn inside the box rather than as a border: a 4px border would
    shrink the card to 232px and the template's own 240px box would hang out. */
 
@@ -903,25 +904,3 @@ body.score {
   white-space: nowrap;
 }
 
-/* Above the title, so the group reads round, title, tally. A full-width strip
-   that centres its own pill, which keeps the pill centred on the canvas no
-   matter how long the round number gets. It clears the title plate, which
-   reaches 16px above the title's own box at the default y of 300. */
-.score .round-pill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 206px;
-  text-align: center;
-}
-.score .round-pill span {
-  display: inline-block;
-  padding: 11px 30px;
-  border-radius: 999px;
-  background: var(--score-plate);
-  box-shadow: inset 0 0 0 1px var(--edge), 0 6px 24px rgba(0, 0, 0, 0.45);
-  color: var(--text);
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1;
-}
