@@ -810,7 +810,7 @@ body.monitor {
 .side-panel .template-panel { padding: 0; background: none; border: 0; border-radius: 0; }
 .side-panel .status-assets { margin-top: 0; }
 .status-assets input:disabled, .status-assets button:disabled { opacity: 0.45; cursor: not-allowed; }
-#resetAll.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }
+#resetAll.confirm-armed, #airNewRound.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }
 
 /* ---------- score: the flag tally, counted live on its own canvas --------- */
 

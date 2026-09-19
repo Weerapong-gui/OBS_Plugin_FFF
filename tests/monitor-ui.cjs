@@ -293,6 +293,8 @@ async function main() {
     // Ending a round asks twice, the way resetting every placement does.
     const before = airRequests.length;
     await page.click("#airNewRound");
+    await page.waitForFunction(() =>
+      document.getElementById("airNewRound").textContent === "กดอีกครั้งเพื่อล้างรอบ");
     assert.equal(airRequests.length, before, "one press only arms the button");
     settled = sent("/api/round");
     await page.click("#airNewRound");
