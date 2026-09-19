@@ -30,6 +30,51 @@
   });
   window.HEADING_DEFAULT = HEADING_DEFAULT;
 
+  // The /score page's two pieces. They are the same two shapes the Show Status
+  // title and the Bottom Bar counters have, so they are described by the same
+  // templates — only what they open at is their own. The defaults live here,
+  // beside every other default, because the page and the monitor's panel both
+  // read them and would otherwise drift apart.
+  // The title's box is in canvas pixels: .score .heading-piece is the whole
+  // 1920x1080 frame, so moving the title is moving this box. The counters keep
+  // the Bottom Bar's arrangement instead — the stylesheet places the two cards
+  // and this box is the digit's rectangle inside each of them.
+  const SCORE_HEADING_DEFAULT = Object.freeze({
+    box: Object.freeze({ x: 660, y: 300, width: 600, height: 120 }),
+    text: "พี่เนย", fontFamily: "", fontSize: 84, fontWeight: 800,
+    lineHeight: 100, align: "center", color: "#ffffff"
+  });
+  const SCORE_COUNT_DEFAULT = Object.freeze({
+    value: Object.freeze({ x: 0, y: 0, width: 240, height: 240 }),
+    fontFamily: "", fontSize: 160, fontWeight: 800,
+    colors: Object.freeze({ red: "#e23c3c", green: "#21b04a" })
+  });
+  window.SCORE_HEADING_DEFAULT = SCORE_HEADING_DEFAULT;
+  window.SCORE_COUNT_DEFAULT = SCORE_COUNT_DEFAULT;
+
+  // Every field is optional, the same way headingOf() treats the Show Status
+  // title: a session saved before this page existed draws the defaults above.
+  window.scoreHeadingOf = function (template) {
+    const saved = template || {};
+    return { box: { ...SCORE_HEADING_DEFAULT.box, ...(saved.box || {}) },
+      text: typeof saved.text === "string" ? saved.text : SCORE_HEADING_DEFAULT.text,
+      fontFamily: saved.fontFamily || SCORE_HEADING_DEFAULT.fontFamily,
+      fontSize: saved.fontSize || SCORE_HEADING_DEFAULT.fontSize,
+      fontWeight: saved.fontWeight || SCORE_HEADING_DEFAULT.fontWeight,
+      lineHeight: saved.lineHeight || SCORE_HEADING_DEFAULT.lineHeight,
+      align: saved.align || SCORE_HEADING_DEFAULT.align,
+      color: saved.color || SCORE_HEADING_DEFAULT.color };
+  };
+
+  window.scoreCountOf = function (template) {
+    const saved = template || {};
+    return { value: { ...SCORE_COUNT_DEFAULT.value, ...(saved.value || {}) },
+      fontFamily: saved.fontFamily || SCORE_COUNT_DEFAULT.fontFamily,
+      fontSize: saved.fontSize || SCORE_COUNT_DEFAULT.fontSize,
+      fontWeight: saved.fontWeight || SCORE_COUNT_DEFAULT.fontWeight,
+      colors: { ...SCORE_COUNT_DEFAULT.colors, ...(saved.colors || {}) } };
+  };
+
   // Every field is optional: a session saved before this card existed, or one
   // the operator has not touched, draws the artwork's own title.
   window.headingOf = function (template) {
@@ -168,6 +213,9 @@
     element._countTimer = setTimeout(settle, roll.duration);
     animation.finished.then(settle, () => {});
   }
+  // /score has no board of its own to render, only the same two numbers, so it
+  // drives them through this directly rather than repeating the roll.
+  window.rollCount = rollCount;
 
   // Leaving the air ends any roll in flight so the next entrance counts up from
   // nothing again instead of resuming a stale one.

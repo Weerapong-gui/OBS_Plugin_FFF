@@ -175,6 +175,38 @@ bool FffSession::setHeadingTemplate(const QJsonObject &value)
 	return true;
 }
 
+// The /score page's title is the same shape as the Show Status one and its
+// counters are the same shape as the Bottom Bar pair, so both are validated by
+// the validators those pieces already own. Only where the value is stored
+// differs, which is the whole point of the page being its own thing.
+bool FffSession::setScoreHeadingTemplate(const QJsonObject &value)
+{
+	if (!validHeadingTemplate(value))
+		return false;
+	const auto previous = m_scoreHeadingTemplate;
+	m_scoreHeadingTemplate = value;
+	if (!save()) {
+		m_scoreHeadingTemplate = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
+bool FffSession::setScoreCountTemplate(const QJsonObject &value)
+{
+	if (!validCountTemplate(value))
+		return false;
+	const auto previous = m_scoreCountTemplate;
+	m_scoreCountTemplate = value;
+	if (!save()) {
+		m_scoreCountTemplate = previous;
+		return false;
+	}
+	emit changed();
+	return true;
+}
+
 // How long each animation runs. The web pages own the defaults and the shapes
 // of the motion; this is only the lengths, so anything left out here keeps the
 // page's default rather than becoming zero. Groups and keys are named exactly
@@ -938,6 +970,14 @@ bool FffSession::validMode(const QString &mode)
 {
 	return mode == QLatin1String("scoreboard") || mode == QLatin1String("bottomBar");
 }
+
+// A superset of validMode(): /score is a page of its own that never goes on
+// air, so it may be described by a template without ever being a display mode
+// POST /api/display would accept.
+bool FffSession::validTemplateMode(const QString &mode)
+{
+	return validMode(mode) || mode == QLatin1String("score");
+}
 bool FffSession::showMode(const QString &mode)
 {
 	if (!validMode(mode))
@@ -1028,6 +1068,12 @@ void FffSession::load()
 	// A session saved before the title existed draws the artwork's own.
 	const auto headingTemplate = root.value(QStringLiteral("headingTemplate")).toObject();
 	m_headingTemplate = validHeadingTemplate(headingTemplate) ? headingTemplate : QJsonObject();
+	// Likewise for the /score page: absent or malformed, the page draws the
+	// defaults board.js holds rather than nothing at all.
+	const auto scoreHeading = root.value(QStringLiteral("scoreHeadingTemplate")).toObject();
+	m_scoreHeadingTemplate = validHeadingTemplate(scoreHeading) ? scoreHeading : QJsonObject();
+	const auto scoreCount = root.value(QStringLiteral("scoreCountTemplate")).toObject();
+	m_scoreCountTemplate = validCountTemplate(scoreCount) ? scoreCount : QJsonObject();
 
 	m_presidents.clear();
 	const QJsonArray presidents = root.value(QStringLiteral("presidents")).toArray();
@@ -1212,6 +1258,10 @@ bool FffSession::save() const
 		root.insert(QStringLiteral("timing"), m_timing);
 	if (!m_headingTemplate.isEmpty())
 		root.insert(QStringLiteral("headingTemplate"), m_headingTemplate);
+	if (!m_scoreHeadingTemplate.isEmpty())
+		root.insert(QStringLiteral("scoreHeadingTemplate"), m_scoreHeadingTemplate);
+	if (!m_scoreCountTemplate.isEmpty())
+		root.insert(QStringLiteral("scoreCountTemplate"), m_scoreCountTemplate);
 	if (!m_cardTemplate.isEmpty())
 		root.insert(QStringLiteral("cardTemplate"), m_cardTemplate);
 	root.insert(QStringLiteral("port"), static_cast<int>(m_port));
@@ -1313,6 +1363,12 @@ QByteArray FffSession::overlayStateJson() const
 	// than inside the bottom bar's own section.
 	if (!m_headingTemplate.isEmpty())
 		root.insert(QStringLiteral("headingTemplate"), m_headingTemplate);
+	// /score is not a board, so its two pieces ride at the root beside the
+	// scoreboard's title rather than in a section of their own.
+	if (!m_scoreHeadingTemplate.isEmpty())
+		root.insert(QStringLiteral("scoreHeadingTemplate"), m_scoreHeadingTemplate);
+	if (!m_scoreCountTemplate.isEmpty())
+		root.insert(QStringLiteral("scoreCountTemplate"), m_scoreCountTemplate);
 	layout.insert(QStringLiteral("x"), m_layout.x);
 	layout.insert(QStringLiteral("y"), m_layout.y);
 	layout.insert(QStringLiteral("scale"), m_layout.scale);

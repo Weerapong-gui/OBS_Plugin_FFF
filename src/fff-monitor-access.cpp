@@ -58,7 +58,10 @@ QByteArray setCookieHeader(const QString &key)
 Endpoint classify(const QByteArray &method, const QString &path)
 {
 	if (method == "GET") {
-		if (path == QLatin1String("/monitor"))
+		// Both monitor pages trade a key in the address bar for a cookie, so
+		// the redirect in the server may reuse `path` verbatim: this returns
+		// MonitorPage only for one of these two string literals.
+		if (path == QLatin1String("/monitor") || path == QLatin1String("/score"))
 			return Endpoint::MonitorPage;
 		if (path == QLatin1String("/api/events/overlay") || path == QLatin1String("/api/monitor/access"))
 			return Endpoint::MonitorApi;

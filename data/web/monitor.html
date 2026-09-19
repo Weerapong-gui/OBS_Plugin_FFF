@@ -72,6 +72,7 @@
     <button type="button" role="tab" id="tab-template" aria-controls="panel-template" aria-selected="false" tabindex="-1">แม่แบบ</button>
     <button type="button" role="tab" id="tab-status-png" aria-controls="panel-status-png" aria-selected="false" tabindex="-1">PNG สถานะ</button>
     <button type="button" role="tab" id="tab-timing" aria-controls="panel-timing" aria-selected="false" tabindex="-1">จังหวะ</button>
+    <button type="button" role="tab" id="tab-score" aria-controls="panel-score" aria-selected="false" tabindex="-1">หน้า Score</button>
   </div>
   <section id="panel-position" class="controls" role="tabpanel" aria-labelledby="tab-position">
     <div class="control-group" role="group" aria-label="ตำแหน่ง">
@@ -171,6 +172,52 @@
       <button id="timingDefaults">คืนค่าเริ่มต้น</button>
     </div>
     <p id="timingStatus" role="status"></p>
+  </section>
+  <section id="panel-score" class="template-panel" role="tabpanel" aria-labelledby="tab-score" hidden>
+    <h2>หน้า Score</h2>
+    <p class="hint">Browser Source แยกอีกหน้า พื้นหลังโปร่ง นับธงสดตลอดโดยไม่ต้องกดขึ้นจอ ·
+      <a id="scoreLink" href="/score" target="_blank" rel="noopener">เปิดดูหน้า Score</a></p>
+    <h3>ข้อความหัวเรื่อง</h3>
+    <label class="template-text">ข้อความ <textarea id="scoreText" rows="2" maxlength="200"></textarea></label>
+    <div class="template-fields">
+      <label>X <input id="scoreHeadingX" type="number" min="-2000" max="2000" step="1" /></label>
+      <label>Y <input id="scoreHeadingY" type="number" min="-2000" max="2000" step="1" /></label>
+      <label>กว้าง <input id="scoreHeadingWidth" type="number" min="1" max="2000" step="1" /></label>
+      <label>สูง <input id="scoreHeadingHeight" type="number" min="1" max="2000" step="1" /></label>
+      <label>Opacity % <input id="scoreHeadingOpacity" type="number" min="0" max="100" step="1" /></label>
+      <label>ขนาดตัวอักษร px <input id="scoreHeadingFontSize" type="number" min="8" max="400" step="1" /></label>
+      <label>ระยะบรรทัด px <input id="scoreHeadingLineHeight" type="number" min="8" max="400" step="1" /></label>
+      <label>น้ำหนัก <select id="scoreHeadingFontWeight"></select></label>
+      <label>จัดชิด <select id="scoreHeadingAlign"><option value="left">ซ้าย</option><option value="center">กึ่งกลาง</option><option value="right">ขวา</option></select></label>
+      <label>สีตัวอักษร <input id="scoreHeadingColor" type="color" /></label>
+      <label>ฟอนต์ในเครื่อง <select id="scoreHeadingFont"><option value="">ค่าเริ่มต้นของระบบ</option></select></label>
+      <label>พิมพ์ชื่อฟอนต์เอง <input id="scoreHeadingFontManual" type="text" maxlength="120" placeholder="เช่น Bai Jamjuree" /></label>
+    </div>
+    <p id="scoreHeadingPreview" class="font-preview"></p>
+    <h3>ตัวเลขธง</h3>
+    <p class="hint">กล่องนี้คือกรอบของตัวเลขในการ์ดของมันเอง ตัวแดงและตัวเขียวใช้กล่องเดียวกัน</p>
+    <div class="template-fields">
+      <label>X <input id="scoreCountX" type="number" min="-2000" max="2000" step="1" /></label>
+      <label>Y <input id="scoreCountY" type="number" min="-2000" max="2000" step="1" /></label>
+      <label>กว้าง <input id="scoreCountWidth" type="number" min="1" max="2000" step="1" /></label>
+      <label>สูง <input id="scoreCountHeight" type="number" min="1" max="2000" step="1" /></label>
+      <label>Opacity % <input id="scoreCountOpacity" type="number" min="0" max="100" step="1" /></label>
+      <label>ขนาดตัวอักษร px <input id="scoreCountFontSize" type="number" min="24" max="400" step="1" /></label>
+      <label>น้ำหนัก <select id="scoreCountFontWeight"></select></label>
+      <label>สีแดง <input id="scoreCountRed" type="color" /></label>
+      <label>สีเขียว <input id="scoreCountGreen" type="color" /></label>
+      <label>ฟอนต์ในเครื่อง <select id="scoreCountFont"><option value="">ค่าเริ่มต้นของระบบ</option></select></label>
+      <label>พิมพ์ชื่อฟอนต์เอง <input id="scoreCountFontManual" type="text" maxlength="120" placeholder="เช่น Bai Jamjuree" /></label>
+    </div>
+    <p id="scoreCountPreview" class="font-preview">0123456789</p>
+    <div class="template-toolbar"><button id="scoreFontPick">ค้นหาฟอนต์ในเครื่อง</button></div>
+    <p id="scoreFontNote" class="hint"></p>
+    <div class="template-toolbar">
+      <button id="scoreApply" disabled>ใช้กับหน้า Score</button>
+      <button id="scoreCancel" disabled>ยกเลิกการแก้ไข</button>
+      <button id="scoreDefaults">คืนค่าเริ่มต้น</button>
+    </div>
+    <p id="scoreStatus" role="status"></p>
   </section>
 </aside></div>
 
@@ -678,6 +725,10 @@ function render(incoming) {
   sourceState = incoming;
   applyTiming(incoming.timing);
   if (!timingDirty && !timingSaving) { resetTimingDraft(); paintTiming(); }
+  // The /score panel follows the session the same way, so a change made from
+  // another monitor lands here without a reload — unless this operator has a
+  // draft of their own open, which the incoming state must not overwrite.
+  if (scoreDraft && !scoreDirty && !scoreSaving) { resetScoreDraft(); paintScore(); }
   sourceState.bottomBar ||= { layout: { x: 0.5, y: 0.5, scale: 1 }, pieces: {}, layers: {} };
   const state = modeState(incoming, editMode);
   lastState = state;
@@ -842,6 +893,235 @@ document.getElementById("timingDefaults").onclick = () => {
 buildTimingFields();
 resetTimingDraft();
 paintTiming();
+
+// ---------- the /score page's own two pieces -------------------------------
+// /score is not a board: it has no stage here, no drag and no layer order, so
+// it is edited as numbers rather than through the canvas. The draft/apply rule
+// is the template panel's — nothing reaches the page until apply, and a refused
+// save rolls the panel back to what the session still holds.
+const scoreClamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const scoreEl = (id) => document.getElementById(id);
+let scoreDraft = null, scoreDirty = false, scoreSaving = false;
+const scoreStatus = scoreEl("scoreStatus");
+const scoreFaceWeights = new Map();
+
+function resetScoreDraft() {
+  scoreDraft = { heading: scoreHeadingOf(sourceState && sourceState.scoreHeadingTemplate),
+    count: scoreCountOf(sourceState && sourceState.scoreCountTemplate) };
+}
+function scoreChanged() {
+  scoreDirty = true;
+  scoreStatus.textContent = "ร่างหน้า Score ยังไม่ถูกใช้";
+  paintScore();
+}
+
+// A family the operator typed by hand, or a browser that will not list fonts,
+// falls back to the full ladder — the same rule the template panel keeps.
+function scoreWeightsFor(family) {
+  const found = scoreFaceWeights.get(family);
+  return found && found.size ? [...found].sort((a, b) => a - b)
+    : FFF_FONT_WEIGHTS.map(([weight]) => weight);
+}
+function paintScoreWeights(select, family, current) {
+  const weights = scoreWeightsFor(family);
+  const names = new Map(FFF_FONT_WEIGHTS);
+  const wanted = weights.join();
+  if (select.dataset.weights !== wanted) {
+    select.dataset.weights = wanted;
+    select.replaceChildren(...weights.map(weight =>
+      new Option(weight + " " + (names.get(weight) || ""), String(weight))));
+  }
+  select.value = String(current);
+}
+
+const SCORE_NUMBERS = [
+  ["scoreHeadingX", d => d.heading.box, "x", -2000, 2000],
+  ["scoreHeadingY", d => d.heading.box, "y", -2000, 2000],
+  ["scoreHeadingWidth", d => d.heading.box, "width", 1, 2000],
+  ["scoreHeadingHeight", d => d.heading.box, "height", 1, 2000],
+  ["scoreHeadingFontSize", d => d.heading, "fontSize", 8, 400],
+  ["scoreHeadingLineHeight", d => d.heading, "lineHeight", 8, 400],
+  ["scoreCountX", d => d.count.value, "x", -2000, 2000],
+  ["scoreCountY", d => d.count.value, "y", -2000, 2000],
+  ["scoreCountWidth", d => d.count.value, "width", 1, 2000],
+  ["scoreCountHeight", d => d.count.value, "height", 1, 2000],
+  ["scoreCountFontSize", d => d.count, "fontSize", 24, 400]
+];
+
+function paintScore() {
+  if (!scoreDraft) return;
+  const set = (id, value) => {
+    const input = scoreEl(id);
+    if (document.activeElement !== input) input.value = value;
+  };
+  for (const [id, pick, key] of SCORE_NUMBERS) set(id, Math.round(pick(scoreDraft)[key]));
+  // Opacity is the one box field that may be absent: a box that never carried
+  // one is fully opaque, which is what applyPieceTemplate draws.
+  set("scoreHeadingOpacity", Math.round((scoreDraft.heading.box.opacity ?? 1) * 100));
+  set("scoreCountOpacity", Math.round((scoreDraft.count.value.opacity ?? 1) * 100));
+  set("scoreText", scoreDraft.heading.text);
+  set("scoreHeadingColor", scoreDraft.heading.color);
+  set("scoreCountRed", scoreDraft.count.colors.red);
+  set("scoreCountGreen", scoreDraft.count.colors.green);
+  set("scoreHeadingAlign", scoreDraft.heading.align);
+  for (const [manual, select, family] of [
+    ["scoreHeadingFontManual", "scoreHeadingFont", scoreDraft.heading.fontFamily],
+    ["scoreCountFontManual", "scoreCountFont", scoreDraft.count.fontFamily]]) {
+    set(manual, family);
+    const picker = scoreEl(select);
+    picker.value = [...picker.options].some(option => option.value === family) ? family : "";
+  }
+  paintScoreWeights(scoreEl("scoreHeadingFontWeight"), scoreDraft.heading.fontFamily,
+    scoreDraft.heading.fontWeight);
+  paintScoreWeights(scoreEl("scoreCountFontWeight"), scoreDraft.count.fontFamily,
+    scoreDraft.count.fontWeight);
+  // The samples carry the weight as well as the family: a sample that does not
+  // is exactly how the panel and the stream came to disagree once before.
+  const headingPreview = scoreEl("scoreHeadingPreview");
+  headingPreview.style.fontFamily = scoreDraft.heading.fontFamily
+    ? '"' + scoreDraft.heading.fontFamily + '"' : "";
+  headingPreview.style.fontWeight = String(scoreDraft.heading.fontWeight);
+  headingPreview.style.color = scoreDraft.heading.color;
+  headingPreview.textContent = scoreDraft.heading.text.split("\n")[0] || "ข้อความหัวเรื่อง";
+  const countPreview = scoreEl("scoreCountPreview");
+  countPreview.style.fontFamily = scoreDraft.count.fontFamily
+    ? '"' + scoreDraft.count.fontFamily + '"' : "";
+  countPreview.style.fontWeight = String(scoreDraft.count.fontWeight);
+  countPreview.style.color = scoreDraft.count.colors.red;
+  countPreview.textContent = "0123456789";
+  scoreEl("scoreFontNote").textContent = scoreEl("scoreFontNote").dataset.found || "";
+  for (const id of ["scoreText", "scoreHeadingAlign", "scoreHeadingColor", "scoreCountRed",
+    "scoreCountGreen", "scoreHeadingFont", "scoreCountFont", "scoreHeadingFontManual",
+    "scoreCountFontManual", "scoreHeadingFontWeight", "scoreCountFontWeight",
+    "scoreHeadingOpacity", "scoreCountOpacity", "scoreFontPick",
+    ...SCORE_NUMBERS.map(([id]) => id)]) scoreEl(id).disabled = scoreSaving;
+  scoreEl("scoreApply").disabled = !scoreDirty || scoreSaving;
+  scoreEl("scoreCancel").disabled = !scoreDirty || scoreSaving;
+  scoreEl("scoreDefaults").disabled = scoreSaving;
+}
+
+for (const [id, pick, key, min, max] of SCORE_NUMBERS) scoreEl(id).onchange = (event) => {
+  if (scoreSaving) return;
+  const value = event.target.valueAsNumber;
+  if (!Number.isFinite(value)) { paintScore(); return; }
+  pick(scoreDraft)[key] = scoreClamp(Math.round(value), min, max);
+  scoreChanged();
+};
+for (const [id, box] of [["scoreHeadingOpacity", d => d.heading.box],
+  ["scoreCountOpacity", d => d.count.value]]) scoreEl(id).onchange = (event) => {
+  if (scoreSaving) return;
+  const value = event.target.valueAsNumber;
+  if (!Number.isFinite(value)) { paintScore(); return; }
+  box(scoreDraft).opacity = scoreClamp(Math.round(value), 0, 100) / 100;
+  scoreChanged();
+};
+scoreEl("scoreText").oninput = (event) => {
+  if (scoreSaving) return;
+  // The session refuses every control character but a newline, so the panel
+  // cannot offer one either: a pasted tab would be refused on apply.
+  scoreDraft.heading.text = event.target.value.replace(/[\u0000-\u0009\u000b-\u001f]/g, "").slice(0, 200);
+  scoreChanged();
+};
+scoreEl("scoreHeadingAlign").onchange = (event) => {
+  if (scoreSaving) return;
+  scoreDraft.heading.align = event.target.value;
+  scoreChanged();
+};
+scoreEl("scoreHeadingColor").oninput = (event) => {
+  if (scoreSaving) return;
+  scoreDraft.heading.color = event.target.value;
+  scoreChanged();
+};
+for (const [id, vote] of [["scoreCountRed", "red"], ["scoreCountGreen", "green"]])
+  scoreEl(id).oninput = (event) => {
+    if (scoreSaving) return;
+    scoreDraft.count.colors = { ...scoreDraft.count.colors, [vote]: event.target.value };
+    scoreChanged();
+  };
+// Choosing a family keeps the current weight when that family really has the
+// face, and otherwise moves to the nearest one it does.
+function setScoreFamily(part, family) {
+  part.fontFamily = family;
+  const weights = scoreWeightsFor(family);
+  if (!weights.includes(part.fontWeight))
+    part.fontWeight = weights.reduce((best, weight) =>
+      Math.abs(weight - part.fontWeight) < Math.abs(best - part.fontWeight) ? weight : best, weights[0]);
+  scoreChanged();
+}
+for (const [id, part] of [["scoreHeadingFont", d => d.heading], ["scoreCountFont", d => d.count],
+  ["scoreHeadingFontManual", d => d.heading], ["scoreCountFontManual", d => d.count]])
+  scoreEl(id).onchange = (event) => {
+    if (scoreSaving) return;
+    setScoreFamily(part(scoreDraft), event.target.value.trim());
+  };
+for (const [id, part] of [["scoreHeadingFontWeight", d => d.heading],
+  ["scoreCountFontWeight", d => d.count]]) scoreEl(id).onchange = (event) => {
+  if (scoreSaving) return;
+  part(scoreDraft).fontWeight = Number(event.target.value) || 400;
+  scoreChanged();
+};
+scoreEl("scoreFontPick").onclick = async () => {
+  const note = scoreEl("scoreFontNote");
+  if (!window.queryLocalFonts) {
+    note.dataset.found = "เบราว์เซอร์นี้อ่านรายชื่อฟอนต์ไม่ได้ ให้พิมพ์ชื่อฟอนต์เอง";
+    paintScore();
+    return;
+  }
+  try {
+    // Every face, not just every family: the weight the operator wants lives in
+    // the face list.
+    scoreFaceWeights.clear();
+    for (const font of await window.queryLocalFonts()) {
+      if (!scoreFaceWeights.has(font.family)) scoreFaceWeights.set(font.family, new Set());
+      scoreFaceWeights.get(font.family).add(fffWeightOfStyle(font.style || ""));
+    }
+    const families = [...scoreFaceWeights.keys()].sort();
+    for (const id of ["scoreHeadingFont", "scoreCountFont"]) {
+      scoreEl(id).replaceChildren(new Option("ค่าเริ่มต้นของระบบ", ""),
+        ...families.map(family => new Option(family, family)));
+      scoreEl(id).dataset.weights = "";
+    }
+    scoreEl("scoreHeadingFontWeight").dataset.weights = "";
+    scoreEl("scoreCountFontWeight").dataset.weights = "";
+    note.dataset.found = `พบ ${families.length} ฟอนต์ในเครื่อง`;
+  } catch (error) {
+    note.dataset.found = "ไม่ได้รับสิทธิ์อ่านรายชื่อฟอนต์ ให้พิมพ์ชื่อฟอนต์เอง";
+  }
+  paintScore();
+};
+scoreEl("scoreApply").onclick = async () => {
+  if (scoreSaving || !scoreDirty) return;
+  const heading = JSON.parse(JSON.stringify(scoreDraft.heading));
+  const count = JSON.parse(JSON.stringify(scoreDraft.count));
+  scoreSaving = true; paintScore();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
+  try {
+    for (const body of [{ mode: "score", piece: "heading", ...heading },
+      { mode: "score", piece: "count", ...count }]) {
+      const response = await fetch("/api/template", { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body), signal: controller.signal });
+      if (!response.ok) throw new Error("save failed");
+    }
+    scoreDirty = false;
+    scoreStatus.textContent = "ใช้กับหน้า Score แล้ว";
+  } catch (error) {
+    scoreDirty = false; resetScoreDraft();
+    scoreStatus.textContent = "บันทึกไม่สำเร็จ คืนค่าก่อนแก้ไขแล้ว";
+  } finally { clearTimeout(timer); scoreSaving = false; paintScore(); }
+};
+scoreEl("scoreCancel").onclick = () => {
+  if (scoreSaving) return;
+  scoreDirty = false; resetScoreDraft(); scoreStatus.textContent = ""; paintScore();
+};
+scoreEl("scoreDefaults").onclick = () => {
+  if (scoreSaving) return;
+  scoreDraft = { heading: scoreHeadingOf(null), count: scoreCountOf(null) };
+  scoreChanged();
+};
+resetScoreDraft();
+paintScore();
 
 fitCanvas();
 setInterval(flush, SAVE_RETRY_MS);

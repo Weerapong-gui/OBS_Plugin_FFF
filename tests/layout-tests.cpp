@@ -192,6 +192,63 @@ int main(int argc, char **argv)
 	      "a colour that is not #rrggbb is refused");
 	check(state(session).value("headingTemplate") == savedHeading, "refused titles change nothing");
 
+	// The /score page. It is a page, not a board: its two pieces reuse the
+	// title and counter validators, and "score" must never become something a
+	// board API would accept.
+	check(!state(session).contains("scoreHeadingTemplate") && !state(session).contains("scoreCountTemplate"),
+	      "no score templates until they are set");
+	const QByteArray scoreHeading =
+		R"({"mode":"score","piece":"heading","box":{"x":660,"y":300,"width":600,"height":120},)"
+		R"("text":"พี่เนย","fontFamily":"Bai Jamjuree","fontSize":84,"fontWeight":800,)"
+		R"("lineHeight":100,"align":"center","color":"#ffffff"})";
+	const QByteArray scoreCount =
+		R"({"mode":"score","piece":"count","value":{"x":0,"y":0,"width":240,"height":240},)"
+		R"("fontFamily":"","fontSize":160,"fontWeight":800,)"
+		R"("colors":{"red":"#e23c3c","green":"#21b04a"}})";
+	check(post(scoreHeading, QStringLiteral("template")) == 200, "score title saves");
+	check(post(scoreCount, QStringLiteral("template")) == 200, "score counters save");
+	const auto savedScoreHeading = state(session).value("scoreHeadingTemplate");
+	const auto savedScoreCount = state(session).value("scoreCountTemplate");
+	check(savedScoreHeading.toObject().value("text").toString() == QString::fromUtf8("พี่เนย") &&
+		      !savedScoreHeading.toObject().contains("piece") && !savedScoreHeading.toObject().contains("mode"),
+	      "the stored score title keeps no routing fields");
+	check(savedScoreCount.toObject().value("colors").toObject().value("red").toString() ==
+			      QLatin1String("#e23c3c") &&
+		      !savedScoreCount.toObject().contains("piece") && !savedScoreCount.toObject().contains("mode"),
+	      "the stored score counters keep no routing fields");
+	check(state(session).value("headingTemplate") == savedHeading, "the score title is not the Show Status one");
+	check(post(R"({"mode":"score","piece":"card","image":{"x":0,"y":0,"width":10,"height":10},)"
+		   R"("result":{"x":0,"y":0,"width":10,"height":10}})",
+		   QStringLiteral("template")) == 400,
+	      "the score page has no cards to describe");
+	check(post(R"({"mode":"score","piece":"logo","image":{"x":0,"y":0,"width":10,"height":10}})",
+		   QStringLiteral("template")) == 400,
+	      "the score page has no centre logo");
+	check(post(R"({"mode":"score","piece":"heading","box":{"x":0,"y":0,"width":420,"height":100},)"
+		   R"("text":"a","fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,)"
+		   R"("align":"middle","color":"#000000"})",
+		   QStringLiteral("template")) == 400,
+	      "the score title is validated like the Show Status one");
+	check(post(R"({"mode":"score","piece":"count","value":{"x":0,"y":0,"width":240,"height":240},)"
+		   R"("fontFamily":"","fontSize":160,"fontWeight":800,"colors":{"red":"red","green":"#21b04a"}})",
+		   QStringLiteral("template")) == 400,
+	      "a score counter colour that is not #rrggbb is refused");
+	check(state(session).value("scoreHeadingTemplate") == savedScoreHeading &&
+		      state(session).value("scoreCountTemplate") == savedScoreCount,
+	      "refused score templates change nothing");
+	// /score never goes on air, so the display and layout APIs must not know it.
+	check(post(R"({"mode":"score"})", QStringLiteral("display")) == 400, "score is not a display mode");
+	check(post(R"({"mode":"score","target":"heading","reset":true})") == 400, "score has no layout targets");
+	check(post(R"({"mode":"score","target":"heading","action":"front"})", QStringLiteral("layer")) == 400,
+	      "score has no layer order");
+	{
+		FffSession reopenedScore;
+		reopenedScore.load();
+		check(state(reopenedScore).value("scoreHeadingTemplate") == savedScoreHeading &&
+			      state(reopenedScore).value("scoreCountTemplate") == savedScoreCount,
+		      "score templates survive a restart");
+	}
+
 	// Animation lengths. Every key is named, so a value can never be filed
 	// under a motion it does not belong to, and a session that carries none
 	// simply leaves every animation at the length the web pages default to.
@@ -664,6 +721,14 @@ int main(int argc, char **argv)
 		   R"("fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})",
 		   QStringLiteral("template")) == 500,
 	      "failed title write reported");
+	check(post(R"({"mode":"score","piece":"heading","box":{"x":0,"y":0,"width":420,"height":100},"text":"changed",)"
+		   R"("fontFamily":"","fontSize":38,"fontWeight":800,"lineHeight":42,"align":"left","color":"#000000"})",
+		   QStringLiteral("template")) == 500,
+	      "failed score title write reported");
+	check(post(R"({"mode":"score","piece":"count","value":{"x":0,"y":0,"width":240,"height":240},)"
+		   R"("fontFamily":"","fontSize":160,"fontWeight":800,"colors":{"red":"#000000","green":"#ffffff"}})",
+		   QStringLiteral("template")) == 500,
+	      "failed score counter write reported");
 	check(post(R"({"target":"heading","reset":true})") == 500, "failed write reported");
 	check(post(R"({"target":"all","reset":true})") == 500, "failed reset reported");
 	check(!session.showMode(QStringLiteral("bottomBar")), "failed display reported");

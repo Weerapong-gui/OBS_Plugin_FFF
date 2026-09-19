@@ -490,6 +490,65 @@ the board starts blank on round one; the seeded session is saved so the next
 launch keeps its PINs; a session that already exists is never replaced and no
 artwork is copied over it; and a build carrying no bundle still starts empty.
 
+## หน้า Score
+
+`/score` เป็น Browser Source ของตัวเอง ไม่ใช่ display mode ที่สาม: มันไม่อ่าน
+`phase` หรือ `displayMode` เลย และนับธงจาก `presidents[].vote` ที่ SSE
+`/api/events/overlay` ส่งมาอยู่แล้ว จึงไม่มี endpoint ใหม่ เส้นทางนี้เป็น
+`Endpoint::MonitorPage` เท่ากับ `/monitor` — เครื่องนี้เปิดได้เสมอ เครื่องใน LAN
+ต้องมีกุญแจ และ `?key=` ถูกแลกเป็น cookie แล้ว 303 กลับมาที่ `/score` เอง
+(redirect ใช้ `path` ได้เพราะ `classify()` คืน `MonitorPage` เฉพาะสตริง `/monitor`
+กับ `/score` เป๊ะ ๆ เท่านั้น จึงไม่มี CRLF จาก URL หลุดเข้าเฮดเดอร์)
+
+หน้านี้มีสองชิ้น และทั้งคู่ใช้ validator เดิม ไม่มีกฎใหม่:
+
+```jsonc
+{"mode":"score","piece":"heading",
+ "box":{"x":660,"y":300,"width":600,"height":120},"text":"พี่เนย",
+ "fontFamily":"Bai Jamjuree","fontSize":84,"fontWeight":800,
+ "lineHeight":100,"align":"center","color":"#ffffff"}
+{"mode":"score","piece":"count",
+ "value":{"x":0,"y":0,"width":240,"height":240},
+ "fontFamily":"","fontSize":160,"fontWeight":800,
+ "colors":{"red":"#e23c3c","green":"#21b04a"}}
+```
+
+`piece` ของ `heading` ใช้ `validHeadingTemplate()` และ `count` ใช้
+`validCountTemplate()` ตัวเดียวกับ Show Status และ BOTTOM BAR; `card` กับ `logo`
+ถูกปฏิเสธด้วย 400 เพราะหน้านี้ไม่มี ค่าที่เก็บไปอยู่ที่ราก session เป็น
+`scoreHeadingTemplate` และ `scoreCountTemplate` (ไม่ใช่ในก้อน `bottomBar`) และ
+overlay SSE ส่งทั้งสองที่รากเช่นกัน session version ยังเป็น 5 เพราะทั้งคู่เป็น
+optional — ไฟล์เก่าเปิดได้ตามเดิมและวาดค่า default
+
+`mode` ของ `score` รับเฉพาะที่ `POST /api/template` ผ่าน
+`FffSession::validTemplateMode()`; `validMode()` ยังเป็น `scoreboard|bottomBar`
+เท่านั้น ดังนั้น `/api/display`, `/api/layout` และ `/api/layer` ตอบ 400 — หน้านี้
+ไม่มีการลากบนกระดานและไม่มีลำดับเลเยอร์
+
+ค่า default อยู่ที่เดียวใน `board.js` (`SCORE_HEADING_DEFAULT`,
+`SCORE_COUNT_DEFAULT` กับ `scoreHeadingOf()` / `scoreCountOf()`) เพราะทั้งหน้า
+`/score` และแผงในจอมอนิเตอร์อ่านจากตัวเดียวกัน `rollCount()` ถูก export ออกมา
+เพื่อให้ตัวเลขบนหน้านี้หมุนด้วยจังหวะเดียวกับตัวนับใน BOTTOM BAR
+`.score .heading-piece` กินเต็มผืนผ้า กล่องหัวเรื่องจึงเป็นพิกัดบนผืนผ้าตรง ๆ
+ส่วน `.score .count-card` ถูกวางด้วย stylesheet แบบเดียวกับ BOTTOM BAR กล่อง
+ตัวเลขหนึ่งกล่องจึงอธิบายทั้งสองตัวได้โดยไม่ทับกัน
+
+`tests/score-page.cjs` เสิร์ฟไฟล์จริงด้วย fixture แล้วตรวจ: หน้าเปิดมาบนค่า
+default, นับธงขณะ `phase: "collecting"`, ตัวนับสองตัวคนละที่คนละสี, ธงที่มาถึง
+ระหว่างเลขกำลังหมุนลงเลขใหม่, ล้างรอบแล้วกลับเป็น 0/0, รายชื่อว่างก็ยังไม่พัง,
+แท็บ **หน้า Score** แก้หน้าได้เฉพาะตอนกดใช้ (ร่างไม่ถึงจอ) และคืนค่าเมื่อเซฟ
+ไม่สำเร็จ และไม่มี JS error
+
+```sh
+NODE_PATH="$FFF_TEST_DEPS/node_modules" node tests/score-page.cjs
+```
+
+`layout-tests` ครอบคลุมฝั่ง native: เซฟและอ่านกลับ, routing field ไม่ติดไปกับ
+ค่าที่เก็บ, `piece` ที่หน้านี้ไม่มีถูกปฏิเสธ, สีและ align ที่ผิดถูกปฏิเสธ,
+`mode:"score"` ถูกปฏิเสธที่ display/layout/layer, ค่าอยู่รอดการเปิดใหม่ และเซฟ
+ล้มเหลวคืนค่าเดิม ส่วน `monitor-access-tests` ครอบคลุมว่ามีแต่ `GET /score`
+เป๊ะ ๆ ที่เป็น `MonitorPage`
+
 ## Monitor LAN access
 
 `monitor-access-tests` covers the pure rules in `src/fff-monitor-access.*`: key

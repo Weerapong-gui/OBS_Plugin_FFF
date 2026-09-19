@@ -163,6 +163,8 @@ void FffSettingsTab::refresh()
 			{QStringLiteral("Browser Source"), QStringLiteral("http://127.0.0.1:%1/overlay").arg(port)});
 		serverLinks.append(
 			{QStringLiteral("จอมอนิเตอร์"), QStringLiteral("http://127.0.0.1:%1/monitor").arg(port)});
+		serverLinks.append({QStringLiteral("Score (Browser Source)"),
+				    QStringLiteral("http://127.0.0.1:%1/score").arg(port)});
 		for (const QString &address : addresses)
 			serverLinks.append(
 				{QStringLiteral("มือถือ"), QStringLiteral("http://%1:%2").arg(address).arg(port)});
@@ -184,11 +186,16 @@ void FffSettingsTab::refresh()
 	} else if (lan && addresses.isEmpty()) {
 		lanNote = noLanText();
 	} else if (lan) {
-		for (const QString &address : addresses)
+		for (const QString &address : addresses) {
 			lanLinks.append({QStringLiteral("Monitor"), QStringLiteral("http://%1:%2/monitor?key=%3")
 									    .arg(address)
 									    .arg(port)
 									    .arg(m_session->monitorKey())});
+			lanLinks.append({QStringLiteral("Score"), QStringLiteral("http://%1:%2/score?key=%3")
+									  .arg(address)
+									  .arg(port)
+									  .arg(m_session->monitorKey())});
+		}
 	}
 	setLinks(m_lanLinks, lanLinks, lanNote);
 	m_lanStatus->setText(QStringLiteral("เชื่อมต่ออยู่: monitor LAN %1").arg(m_server->remoteMonitorClientCount()));

@@ -353,10 +353,13 @@ void FffHttpServer::readFrom(QTcpSocket *socket)
 		return;
 	case FffMonitorAccess::Decision::Redirect:
 		// Trade the key in the address bar for a cookie the page's own requests
-		// carry, and leave a clean URL behind.
+		// carry, and leave a clean URL behind. Sending `path` back as a header
+		// is safe only because classify() answers MonitorPage for an exact
+		// match against "/monitor" or "/score" and nothing else, so no decoded
+		// CRLF from the request line can reach this line.
 		send(socket, 303, "text/plain; charset=utf-8", QByteArray(), "no-store",
-		     "Location: /monitor\r\nSet-Cookie: " + FffMonitorAccess::setCookieHeader(access.storedKey) +
-			     "\r\n");
+		     "Location: " + path.toUtf8() +
+			     "\r\nSet-Cookie: " + FffMonitorAccess::setCookieHeader(access.storedKey) + "\r\n");
 		return;
 	case FffMonitorAccess::Decision::Allow:
 		break;
@@ -391,6 +394,13 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 		}
 		if (path == QLatin1String("/overlay")) {
 			sendWebFile(socket, QStringLiteral("overlay.html"), "text/html; charset=utf-8");
+			return;
+		}
+		if (path == QLatin1String("/score")) {
+			// A Browser Source of its own: the flag tally, counted live, with
+			// no reveal to wait for. Same admission as /monitor, since it
+			// shows votes the stream has not put on air yet.
+			sendWebFile(socket, QStringLiteral("score.html"), "text/html; charset=utf-8");
 			return;
 		}
 		if (path == QLatin1String("/monitor")) {
@@ -482,8 +492,27 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 			auto value = QJsonDocument::fromJson(body).object();
 			const QString mode = value.take(QStringLiteral("mode")).toString(QStringLiteral("scoreboard"));
 			const QString piece = value.take(QStringLiteral("piece")).toString(QStringLiteral("card"));
-			if (!FffSession::validMode(mode)) {
+			if (!FffSession::validTemplateMode(mode)) {
 				sendJson(socket, 400, "{\"error\":\"invalid mode\"}");
+				return;
+			}
+			// /score has a title and a pair of counters and nothing else, so
+			// it answers before the two boards' own piece rules below.
+			if (mode == QLatin1String("score")) {
+				const bool heading = piece == QLatin1String("heading");
+				if (!heading && piece != QLatin1String("count")) {
+					sendJson(socket, 400, "{\"error\":\"invalid piece\"}");
+					return;
+				}
+				if (!(heading ? FffSession::validHeadingTemplate(value)
+					      : FffSession::validCountTemplate(value))) {
+					sendJson(socket, 400, "{\"error\":\"invalid template\"}");
+					return;
+				}
+				const bool saved = heading ? m_session->setScoreHeadingTemplate(value)
+							   : m_session->setScoreCountTemplate(value);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 				return;
 			}
 			// The logo and the flag counters are Bottom Bar furniture and
@@ -865,7 +894,7 @@ void FffHttpServer::sendDenied(QTcpSocket *socket, const QString &path, bool del
 		it.value().closing = true;
 
 	const auto reply = [this, path](QTcpSocket *target) {
-		if (path == QLatin1String("/monitor"))
+		if (path == QLatin1String("/monitor") || path == QLatin1String("/score"))
 			send(target, 403, "text/html; charset=utf-8", monitorDeniedPage());
 		else if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo"))
 			sendJson(target, 403, "{\"error\":\"local only\"}");

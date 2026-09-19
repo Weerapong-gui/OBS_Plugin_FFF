@@ -805,3 +805,123 @@ body.monitor {
 .side-panel .status-assets { margin-top: 0; }
 .status-assets input:disabled, .status-assets button:disabled { opacity: 0.45; cursor: not-allowed; }
 #resetAll.confirm-armed { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* ---------- score: the flag tally, counted live on its own canvas --------- */
+
+/* Never blank and never animated in or out: this page carries no phase, so the
+   only motion on it is the count roll it shares with BOTTOM BAR. Everything
+   below is scoped to .score because .heading-text, .count-card and .count-value
+   are also the overlay's and the monitor's template preview. */
+body.score {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* This page is a Browser Source over live video, so the background is whatever
+   the stream happens to be showing and nothing may rely on it. Each piece
+   brings its own plate. More opaque than the dock's --panel: at 0.86 the red
+   counter falls to about 3.0:1 over a bright scene, at 0.94 it is about 3.8:1,
+   and the digits are large text (3:1). Green clears either way. */
+.score {
+  --score-plate: rgba(11, 14, 19, 0.94);
+  --score-lift: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --score-radius: 22px;
+}
+
+/* The title's piece is the whole frame, so the box in scoreHeadingTemplate is
+   in canvas pixels and moving the title is editing that box. This overrides
+   the fixed 54,72 the Show Status title sits at. */
+.score .heading-piece { left: 0; top: 0; width: 1920px; height: 1080px; }
+
+/* align-content centres the words in the box while the text stays a full-width
+   grid item, which is what keeps the template's own text-align working. */
+.score .heading-text {
+  display: grid;
+  align-content: center;
+  padding: 0 28px;
+}
+
+/* The plate hangs off the element applyHeadingTemplate() writes the box to, so
+   it is the operator's box: move or resize the title and the plate follows it
+   exactly. It is drawn on a pseudo-element rather than on the element itself so
+   it can be a little taller than that box - a Thai tone mark stacks above the
+   line box and would otherwise cross the top edge of the plate it sits on.
+   z-index keeps it behind the words. The rim is a faint white hairline, not a
+   flag colour: colour on this page means red or green, and a title is neither. */
+.score .heading-text::before {
+  content: "";
+  position: absolute;
+  inset: -16px 0;
+  z-index: -1;
+  border-radius: var(--score-radius);
+  background: var(--score-plate);
+  box-shadow: inset 0 0 0 1px var(--edge), var(--score-lift);
+}
+
+/* The counters keep BOTTOM BAR's arrangement: the stylesheet places the two
+   cards and the shared scoreCountTemplate box is the digit inside each, which
+   is why one box can describe both without them landing on each other. The
+   plate goes on the card rather than on that box, so moving the digit cannot
+   drag the plate off with it. 660 and 1020 put the pair under the title's own
+   600px width with a gap wide enough to read as two things. */
+.score .count-card {
+  position: absolute;
+  top: 470px;
+  width: 240px;
+  height: 240px;
+  border-radius: var(--score-radius);
+  background: var(--score-plate);
+  box-shadow: inset 0 0 0 4px currentColor, var(--score-lift);
+}
+.score .count-red { left: 660px; color: var(--red); }
+.score .count-green { left: 1020px; color: var(--green); }
+/* The rim is drawn inside the box rather than as a border: a 4px border would
+   shrink the card to 232px and the template's own 240px box would hang out. */
+
+/* Which number is which flag, for anyone who has just tuned in. The word and
+   the rim take the card's colour through currentColor, so one declaration per
+   card sets both. Fixed words in the page - the operator's templates describe
+   the title and the digits only. */
+.score .count-label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 16px);
+  transform: translateX(-50%);
+  padding: 12px 40px;
+  border-radius: 999px;
+  background: var(--score-plate);
+  box-shadow: inset 0 0 0 3px currentColor, 0 6px 24px rgba(0, 0, 0, 0.45);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Above the title, so the group reads round, title, tally. A full-width strip
+   that centres its own pill, which keeps the pill centred on the canvas no
+   matter how long the round number gets. It clears the title plate, which
+   reaches 16px above the title's own box at the default y of 300. */
+.score .round-pill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 206px;
+  text-align: center;
+}
+.score .round-pill span {
+  display: inline-block;
+  padding: 11px 30px;
+  border-radius: 999px;
+  background: var(--score-plate);
+  box-shadow: inset 0 0 0 1px var(--edge), 0 6px 24px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+}
