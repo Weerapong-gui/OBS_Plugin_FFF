@@ -43,7 +43,7 @@ Monitor LAN งานทั้งหมดแบ่งเป็นสองเ�
 | Show Status / BOTTOM BAR (toggle) | `POST /api/display` เดิม |
 | ■ ซ่อนจอ | `POST /api/display` **ขยายให้รับคำสั่งซ่อน** |
 | ↻ เริ่มรอบใหม่ | 🆕 `POST /api/round` |
-| Round 1 / Round 2 ของโลโก้กลาง | `POST /api/logo` เดิม |
+| Round 1 / Round 2 ของโลโก้กลาง | `POST /api/logo` **ขยายให้รับ `round`** |
 | เลือกสำนักของโลโก้กลาง | `POST /api/logo` เดิม |
 | คำเตือน "ยังไม่มี PNG ของ Round 2" | อ่านจาก SSE เดิม |
 | รายการ "ใครโหวตแล้ว" พร้อมสีและชื่อ | อ่านจาก SSE เดิม |
@@ -91,19 +91,36 @@ PNG ชนิด `card` / `bottomBar` / `logo` / `logo2` (วันนี้ `/a
 เลือกขยาย endpoint เดิมแทนการเพิ่ม `/api/hide` เพราะการควบคุมภาพออกอากาศควรอยู่ที่
 เดียว และไม่ต้องเพิ่มรายการใน `classify()` กับ `deniedText()`
 
-### 2.2 `POST /api/round` — เริ่มรอบใหม่ (ใหม่)
+### 2.2 `POST /api/logo` — ขยายให้เลือก Round ได้
+
+`FffSession::setLogoRound()` **ไม่มี endpoint เลย** มีแต่ dock ที่เรียกตรง ๆ ในโปรเซส
+(`fff-dock-live.cpp:199`) ส่วน `/api/logo` วันนี้อ่านแต่ `presidentId`
+
+รับเพิ่มอีกรูปแบบหนึ่ง ตามแบบเดียวกับ `hide`:
+
+```jsonc
+{"round": 1}   // หรือ 2 → FffSession::setLogoRound()
+```
+
+- คำขอที่มี `presidentId` ทำงาน **เหมือนเดิมทุกประการ**
+- มีทั้ง `presidentId` และ `round` → `400` — หนึ่งคำขอหมายถึงหนึ่งเจตนา
+- `round` ที่ไม่ใช่ 1 หรือ 2 → `400`
+- ยังเป็น `Endpoint::LocalOnly` เหมือนเดิม
+
+### 2.3 `POST /api/round` — เริ่มรอบใหม่ (ใหม่)
 
 ```jsonc
 {"action": "clear"}   // → FffSession::clearRound()
 ```
 
-- `Endpoint::LocalOnly` — ต้องเพิ่มใน `classify()` และเพิ่มข้อความใน `deniedText()`
-  (`"new round is local only"`)
+- `Endpoint::LocalOnly` — ต้องเพิ่มใน `classify()` และเพิ่มใน `sendDenied()` สาขาที่
+  ตอบ JSON ร่วมกับ `/api/display` และ `/api/logo` (**ไม่ใช่** `deniedText()` ซึ่งเป็น
+  ทางข้อความล้วนและจะไม่ถูกเรียกเลย)
 - `action` ที่ไม่ใช่ `"clear"` → `400` — ไม่ยอมให้คำขอว่างเปล่าล้างรอบโดยบังเอิญ
 - เซฟไม่สำเร็จ → `500` และ `clearRound()` คืนค่าเดิมให้เองอยู่แล้ว
 - **ไม่มีกล่องยืนยันฝั่งเซิร์ฟเวอร์** การยืนยันเป็นเรื่องของ UI เหมือนที่ dock ทำ
 
-### 2.3 `GET /api/monitor/capabilities` — ใหม่
+### 2.4 `GET /api/monitor/capabilities` — ใหม่
 
 ```jsonc
 {"onAir": true}    // เปิดจาก 127.0.0.1
@@ -117,7 +134,7 @@ PNG ชนิด `card` / `bottomBar` / `logo` / `logo2` (วันนี้ `/a
 **ไม่แตะ `GET /api/monitor/access`** ซึ่งวันนี้ตอบ `204` และ `checkAccess()` ใน
 `monitor-ui.js` พึ่งพาอยู่
 
-### 2.4 ไม่ต้องแตะ SSE เลย
+### 2.5 ไม่ต้องแตะ SSE เลย
 
 ทุกอย่างที่แถบไลฟ์ต้องแสดง อยู่ในเฟรมเดิมอยู่แล้ว:
 
@@ -198,7 +215,7 @@ SSE (เดิม) → render() → อัปเดตสถานะปุ่�
 
 | ชุด | เพิ่มอะไร |
 |---|---|
-| `layout-tests` | `POST /api/round {"action":"clear"}` ล้างโหวตและขึ้นรอบถัดไป · `action` อื่น → 400 · เซฟล้มเหลว → 500 และรอบไม่ขยับ · `POST /api/display {"hide":true}` ทำให้ `phase` กลับเป็น collecting โดยโหวตยังอยู่ · ส่งทั้ง `mode` และ `hide` → 400 · **คำขอ `{"mode":"bottomBar"}` เดิมยังได้ผลเหมือนเดิมทุกประการ** |
+| `layout-tests` | `POST /api/round {"action":"clear"}` ล้างโหวตและขึ้นรอบถัดไป · `action` อื่น → 400 · เซฟล้มเหลว → 500 และรอบไม่ขยับ · `POST /api/display {"hide":true}` ทำให้ `phase` กลับเป็น collecting โดยโหวตยังอยู่ · ส่งทั้ง `mode` และ `hide` → 400 · `POST /api/logo {"round":2}` เปลี่ยน `logoRound` · `round` นอก 1/2 → 400 · ส่งทั้ง `presidentId` และ `round` → 400 · **คำขอ `{"mode":"bottomBar"}` และ `{"presidentId":"…"}` เดิมยังได้ผลเหมือนเดิมทุกประการ** |
 | `monitor-access-tests` | `POST /api/round` เป็น `LocalOnly` · `GET /api/monitor/capabilities` เป็น `MonitorApi` · `/api/display` ยังเป็น `LocalOnly` |
 | `monitor-lan-tests` | เครื่อง LAN จริงได้ 403 ที่ `/api/round` และที่ `/api/display {"hide":true}` · ได้ `{"onAir":false}` ที่ capabilities · เครื่องนี้ได้ `{"onAir":true}` |
 | `dock-tests` | **ผ่านโดยไม่แก้ไฟล์เทสต์** |
