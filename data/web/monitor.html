@@ -1169,6 +1169,9 @@ function paintAir() {
 
 async function sendAir(url, body) {
   if (!onAir || airBusy) return;
+  // paintLive() here (not just in the finally) disables the school select
+  // for the duration of the request, so a change made mid-flight isn't
+  // silently dropped by the guard above once this call resolves.
   airBusy = true; paintAir(); paintLive();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
