@@ -473,18 +473,43 @@ void FffHttpServer::route(QTcpSocket *socket, const QByteArray &method, const QS
 	} else if (method == "POST") {
 		if (path == QLatin1String("/api/display") || path == QLatin1String("/api/logo")) {
 			const auto request = QJsonDocument::fromJson(body).object();
-			const QString value = request.value(path == QLatin1String("/api/display")
-								    ? QStringLiteral("mode")
-								    : QStringLiteral("presidentId"))
-						      .toString();
-			if ((path == QLatin1String("/api/display") && !FffSession::validMode(value)) ||
-			    (path == QLatin1String("/api/logo") && !value.isEmpty() &&
-			     !m_session->presidentById(value))) {
+			const bool display = path == QLatin1String("/api/display");
+			// Taking the board down is the one display change validMode()
+			// cannot express, and the logo's round is the one logo change
+			// presidentId cannot. Each rides its own field so a request that
+			// worked before works exactly the same way now; carrying both
+			// fields is a caller that has not decided what it wants.
+			if (display && request.contains(QStringLiteral("hide"))) {
+				if (request.contains(QStringLiteral("mode")) ||
+				    !request.value(QStringLiteral("hide")).toBool()) {
+					sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
+					return;
+				}
+				const bool saved = m_session->hideDisplay();
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			if (!display && request.contains(QStringLiteral("round"))) {
+				const int round = request.value(QStringLiteral("round")).toInt();
+				if (request.contains(QStringLiteral("presidentId")) || (round != 1 && round != 2)) {
+					sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
+					return;
+				}
+				const bool saved = m_session->setLogoRound(round);
+				sendJson(socket, saved ? 200 : 500,
+					 saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
+				return;
+			}
+			const QString value =
+				request.value(display ? QStringLiteral("mode") : QStringLiteral("presidentId"))
+					.toString();
+			if ((display && !FffSession::validMode(value)) ||
+			    (!display && !value.isEmpty() && !m_session->presidentById(value))) {
 				sendJson(socket, 400, "{\"error\":\"invalid selection\"}");
 				return;
 			}
-			const bool saved = path == QLatin1String("/api/display") ? m_session->showMode(value)
-										 : m_session->setLogoPresident(value);
+			const bool saved = display ? m_session->showMode(value) : m_session->setLogoPresident(value);
 			sendJson(socket, saved ? 200 : 500, saved ? "{\"ok\":true}" : "{\"error\":\"save failed\"}");
 			return;
 		}

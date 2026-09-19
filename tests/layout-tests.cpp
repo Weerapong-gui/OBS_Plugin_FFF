@@ -241,6 +241,33 @@ int main(int argc, char **argv)
 	check(post(R"({"mode":"score","target":"heading","reset":true})") == 400, "score has no layout targets");
 	check(post(R"({"mode":"score","target":"heading","action":"front"})", QStringLiteral("layer")) == 400,
 	      "score has no layer order");
+	// Taking the board down and choosing the logo's round are the two things
+	// the dock could do that no request could express. Each travels as its own
+	// field so the shapes that already work are untouched.
+	check(post(R"({"mode":"bottomBar"})", QStringLiteral("display")) == 200 &&
+		      session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("bottomBar"),
+	      "a mode request still puts a board on air");
+	check(post(R"({"hide":true})", QStringLiteral("display")) == 200 && session.phase() == FffPhase::Collecting,
+	      "hide takes the board down");
+	check(session.displayMode() == QLatin1String("bottomBar"),
+	      "hiding remembers the mode, the way the dock's button does");
+	check(post(R"({"hide":true,"mode":"bottomBar"})", QStringLiteral("display")) == 400 &&
+		      session.phase() == FffPhase::Collecting,
+	      "one request cannot both show and hide");
+	check(post(R"({"hide":false})", QStringLiteral("display")) == 400, "only true hides");
+	check(post(R"({"mode":"nonsense"})", QStringLiteral("display")) == 400, "an unknown mode is still refused");
+
+	check(session.logoRound() == 1, "the logo starts on round 1");
+	check(post(R"({"round":2})", QStringLiteral("logo")) == 200 && session.logoRound() == 2,
+	      "the logo round can be chosen over HTTP");
+	check(post(R"({"round":3})", QStringLiteral("logo")) == 400 && session.logoRound() == 2,
+	      "a round that has no artwork set is refused");
+	check(post(R"({"round":2,"presidentId":"one"})", QStringLiteral("logo")) == 400,
+	      "one request cannot both pick a school and a round");
+	check(post(R"({"presidentId":"one"})", QStringLiteral("logo")) == 200 &&
+		      session.logoPresidentId() == QLatin1String("one"),
+	      "choosing a school still works");
+	check(post(R"({"round":1})", QStringLiteral("logo")) == 200 && session.logoRound() == 1, "back to round 1");
 	{
 		FffSession reopenedScore;
 		reopenedScore.load();
