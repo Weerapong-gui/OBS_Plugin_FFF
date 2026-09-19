@@ -419,6 +419,11 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ### Task 4: the four on-air buttons in the pinned top strip
 
+> Tasks 4 and 5 both append cases to `tests/monitor-ui.cjs` and both mutate the
+> shared `state` fixture. Append each new case at the END of `main()`'s existing
+> cases, and leave `state` as you found it (`phase: "collecting"`,
+> `displayMode: "scoreboard"`) so the cases stay order-independent.
+
 **Files:**
 - Modify: `data/web/monitor.html` — markup in `.top-tools`, and the script block
 - Modify: `data/web/app.css` — one rule for the new group
@@ -426,7 +431,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `POST /api/display` (Task 1), `POST /api/round` (Task 2), `GET /api/monitor/capabilities` (Task 3), `window.armConfirm(button, onConfirm, options)` from `monitor-ui.js`, the existing `sourceState`, `saveStatus` and `SAVE_TIMEOUT_MS` in `monitor.html`
-- Produces: `paintAir()` — repaints the four buttons from `sourceState` and `onAir`; called from `render()`
+- Produces: `paintAir()` — repaints the four buttons from `sourceState` and `onAir`; called from `render()`. No test-only global is added to the page: browser tests await the real response with `page.waitForResponse`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -467,28 +472,36 @@ Then add this case inside `main()`, after the existing timing-panel case:
     await page.waitForFunction(() => !document.getElementById("airScoreboard").disabled);
     assert.equal(await page.$eval("#airBottomBar", (el) => el.getAttribute("aria-pressed")), "false");
 
+    // Awaiting the real response keeps the handshake out of the page: no
+    // test-only global lives in code that ships.
+    const sent = (suffix) => page.waitForResponse((res) => res.url().endsWith(suffix));
+
+    let settled = sent("/api/display");
     await page.click("#airBottomBar");
-    await page.waitForFunction(() => window.__airSettled === true);
+    await settled;
     assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { mode: "bottomBar" } });
 
     // With that mode on air, the same button asks for the board to come down.
     state.phase = "revealed"; state.displayMode = "bottomBar"; push();
     await page.waitForFunction(() =>
       document.getElementById("airBottomBar").getAttribute("aria-pressed") === "true");
+    settled = sent("/api/display");
     await page.click("#airBottomBar");
-    await page.waitForFunction(() => window.__airSettled === true);
+    await settled;
     assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
 
+    settled = sent("/api/display");
     await page.click("#airHide");
-    await page.waitForFunction(() => window.__airSettled === true);
+    await settled;
     assert.deepEqual(airRequests.at(-1), { url: "/api/display", body: { hide: true } });
 
     // Ending a round asks twice, the way resetting every placement does.
     const before = airRequests.length;
     await page.click("#airNewRound");
     assert.equal(airRequests.length, before, "one press only arms the button");
+    settled = sent("/api/round");
     await page.click("#airNewRound");
-    await page.waitForFunction(() => window.__airSettled === true);
+    await settled;
     assert.deepEqual(airRequests.at(-1), { url: "/api/round", body: { action: "clear" } });
 
     // A LAN operator sees the buttons and is told why they do nothing.
@@ -573,7 +586,6 @@ function paintAir() {
 async function sendAir(url, body) {
   if (!onAir || airBusy) return;
   airBusy = true; paintAir();
-  window.__airSettled = false;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SAVE_TIMEOUT_MS);
   try {
@@ -581,13 +593,13 @@ async function sendAir(url, body) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body), signal: controller.signal });
     if (!response.ok) throw new Error("refused");
-    saveStatus.textContent = "";
+    // Nothing is written on success: the next SSE frame is the answer, and
+    // saveStatus belongs to the layout save pump.
   } catch (error) {
     saveStatus.textContent = "สั่งไม่สำเร็จ";
   } finally {
     clearTimeout(timer);
     airBusy = false; paintAir();
-    window.__airSettled = true;
   }
 }
 
@@ -692,8 +704,9 @@ Then the case:
       ["● เขียว · นายก 0", "○ ยังไม่กด · นายก 1", "○ ยังไม่กด · นายก 2"]);
 
     assert.equal(await page.$eval("#logoRound1", (el) => el.getAttribute("aria-pressed")), "true");
+    const logoSent = page.waitForResponse((res) => res.url().endsWith("/api/logo"));
     await page.click("#logoRound2");
-    await page.waitForFunction(() => window.__airSettled === true);
+    await logoSent;
     assert.deepEqual(airRequests.at(-1), { url: "/api/logo", body: { round: 2 } });
 
     // Round 2 with no artwork behind it leaves the centre empty on air, so say so.
