@@ -101,6 +101,8 @@ if(ENABLE_QT AND ENABLE_FRONTEND_API)
       src/fff-dock-settings.cpp
       src/fff-dock-settings.h
       src/fff-dock-ui.h
+      src/fff-hotkeys.cpp
+      src/fff-hotkeys.h
       src/fff-http-server.cpp
       src/fff-http-server.h
       src/fff-monitor-access.cpp

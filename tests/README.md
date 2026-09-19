@@ -568,6 +568,34 @@ wrong key, `GET /api/monitor/access`, the upload cap lifted only for a valid
 cookie, and on-air routes refusing the cookie. Without a LAN address they print
 `SKIP: no LAN address` and pass.
 
+## Hotkeys
+
+`hotkey-tests` ขับ `src/fff-hotkeys.cpp` ของจริงกับ libobs ปลอมใน
+`tests/obs-hotkey-stubs.*` (`obs_hotkey_register_frontend/_unregister/_save/_load`
+กับ `obs_data_*` เท่าที่ปลั๊กอินเรียก) ตัว stub เก็บ binding เป็นตัวเลขแทนคีย์จริง
+เพราะ binding เป็นของทึบสำหรับปลั๊กอินอยู่แล้ว — สิ่งที่ต้องพิสูจน์คือ binding ของ
+hotkey ไหนกลับไปเข้า hotkey นั้น
+
+ครอบคลุม: ลงทะเบียนครบสี่ชื่อ (`fff.toggle_show_status`, `fff.toggle_bottom_bar`,
+`fff.hide_screen`, `fff.new_round`) พร้อมข้อความที่ Settings → Hotkeys แสดง;
+callback ที่ `pressed == false` ไม่ทำอะไรเลย ปล่อยคีย์จึงไม่ยิงซ้ำ;
+callback ที่ `pressed == true` ยังไม่ทำงานจนกว่า event loop จะหมุน (มันถูก
+queue ข้ามจากเธรด hotkey ของ libobs มาที่เธรด Qt) แล้วผลตรงกับปุ่มของมันและ dock
+ตามทัน; คีย์ `fff.new_round` ล้างรอบโดยไม่เรียก `fffConfirm()` เลย;
+`saveBindings()` เขียน `hotkeys.json` ครบทุกคีย์ภายใต้ชื่อของตัวเอง; สร้าง
+`FffHotkeys` ใหม่แล้วได้ binding เดิมกลับมาบน id ใหม่และยังกดใช้งานได้;
+ไม่มีไฟล์ = ทุกคีย์ว่างแต่ยังทำงาน; และออกจากสโคปแล้ว unregister ครบ
+
+ชื่อทั้งสี่เป็นส่วนหนึ่งของรูปแบบที่เซฟไว้ เปลี่ยนชื่อเมื่อไหร่คีย์ที่ operator ตั้งไว้หาย
+
+`dock-tests` คุมฝั่งที่ไม่ต้องมี OBS: `toggleMode()` / `hideScreen()` ให้ผลเท่ากับการ
+คลิกปุ่มของมัน และ `startNewRound(bool)` ถามยืนยันเฉพาะตอน `confirm == true` —
+ปุ่มใน dock ส่ง `true`, hotkey ส่ง `false`
+
+```sh
+ctest --test-dir /private/tmp/fff-layout-native -R "hotkey-tests|dock-tests" --output-on-failure
+```
+
 ## Dock panels
 
 `dock-tests` builds the dock panels without OBS (`src/fff-dock.cpp`, the only

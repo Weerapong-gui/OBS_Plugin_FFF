@@ -30,6 +30,16 @@ public:
 	// An empty message hides the line.
 	void showError(const QString &message);
 
+	// What the live bar's buttons do, with the button taken out of it: an OBS
+	// hotkey reaches the same three and so gets the same error line and the
+	// same refresh without repeating any of it.
+	void toggleMode(const QString &mode);
+	void hideScreen();
+	// The confirmation belongs to the button, not to the action. A hotkey
+	// passes false and the round is cleared at once — there is no dialog to
+	// answer while the operator's hands are on the keyboard.
+	void startNewRound(bool confirm);
+
 	QLabel *banner() const { return m_banner; }
 	QLabel *summary() const { return m_summary; }
 	QLabel *error() const { return m_error; }
@@ -44,8 +54,6 @@ public:
 
 private:
 	void pressRound(int round);
-	void pressMode(const QString &mode);
-	void startNewRound();
 	void refreshLogo();
 
 	FffSession *m_session = nullptr;

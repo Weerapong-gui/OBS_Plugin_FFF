@@ -7,6 +7,7 @@ GPL-2.0-or-later
 #include "fff-dock-live.h"
 #include "fff-dock-roster.h"
 #include "fff-dock-settings.h"
+#include "fff-hotkeys.h"
 #include "fff-http-server.h"
 #include "fff-session.h"
 
@@ -44,14 +45,20 @@ QScrollArea *scrollable(QWidget *content)
 class FffDock : public QWidget {
 public:
 	FffDock();
+	~FffDock() override;
 
 private:
 	void refreshAttention();
+	// OBS does not announce that a binding changed, but it does announce that
+	// it is saving, which is often enough and covers closing down.
+	static void onFrontendSave(obs_data_t *save_data, bool saving, void *data);
 
 	FffSession *m_session = nullptr;
 	FffHttpServer *m_server = nullptr;
 	QTabWidget *m_tabs = nullptr;
 	FffSettingsTab *m_settings = nullptr;
+	FffLivePanel *m_live = nullptr;
+	FffHotkeys *m_hotkeys = nullptr;
 };
 
 FffDock::FffDock()
@@ -70,8 +77,13 @@ FffDock::FffDock()
 	root->setContentsMargins(0, 0, 0, 0);
 	root->setSpacing(0);
 
-	auto *live = new FffLivePanel(m_session, m_server, this);
-	root->addWidget(live);
+	m_live = new FffLivePanel(m_session, m_server, this);
+	root->addWidget(m_live);
+
+	// The live bar's buttons, reachable from OBS > Settings > Hotkeys. A child
+	// of this dock, so removing the dock unregisters them.
+	m_hotkeys = new FffHotkeys(m_live, m_session->configDir(), this);
+	obs_frontend_add_save_callback(onFrontendSave, this);
 
 	auto *liveTab = new FffLiveTab(m_session);
 	auto *roster = new FffRosterTab(m_session);
@@ -85,14 +97,29 @@ FffDock::FffDock()
 	if (!started)
 		m_settings->setStartError(QStringLiteral("เปิดพอร์ต %1 ไม่ได้: %2").arg(m_session->port()).arg(startError));
 
-	connect(roster, &FffRosterTab::errorRaised, live, &FffLivePanel::showError);
-	connect(m_settings, &FffSettingsTab::errorRaised, live, &FffLivePanel::showError);
+	connect(roster, &FffRosterTab::errorRaised, m_live, &FffLivePanel::showError);
+	connect(m_settings, &FffSettingsTab::errorRaised, m_live, &FffLivePanel::showError);
 	connect(m_session, &FffSession::changed, this, [this]() { refreshAttention(); });
 	connect(m_server, &FffHttpServer::clientsChanged, this, [this]() { refreshAttention(); });
 
 	// An empty roster is the one job left before anything can go on air.
 	m_tabs->setCurrentIndex(m_session->presidents().isEmpty() ? TabRoster : TabLive);
 	refreshAttention();
+}
+
+FffDock::~FffDock()
+{
+	// Before the children go, or a save could arrive at a half-torn dock.
+	obs_frontend_remove_save_callback(onFrontendSave, this);
+}
+
+void FffDock::onFrontendSave(obs_data_t *, bool saving, void *data)
+{
+	auto *dock = static_cast<FffDock *>(data);
+	// The scene collection this is saving holds nothing of ours; it is only
+	// the moment that says "a good time to write".
+	if (saving && dock->m_hotkeys)
+		dock->m_hotkeys->saveBindings();
 }
 
 void FffDock::refreshAttention()

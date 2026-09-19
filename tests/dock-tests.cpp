@@ -101,6 +101,23 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	check(session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("scoreboard"),
 	      "and back on");
 
+	// The three actions an OBS hotkey reaches. They are the buttons' own code
+	// with the button taken out, so the panel has to follow either way round.
+	panel.toggleMode(QStringLiteral("bottomBar"));
+	check(session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("bottomBar") &&
+		      panel.bottomBarButton()->isChecked() && !panel.scoreboardButton()->isChecked(),
+	      "toggleMode puts a mode on air and the buttons follow");
+	panel.hideScreen();
+	check(session.phase() == FffPhase::Collecting && !panel.hideButton()->isEnabled(),
+	      "hideScreen blanks the stream");
+	panel.toggleMode(QStringLiteral("bottomBar"));
+	panel.toggleMode(QStringLiteral("bottomBar"));
+	check(session.phase() == FffPhase::Collecting && !panel.bottomBarButton()->isChecked(),
+	      "toggleMode takes the aired mode back off");
+	panel.toggleMode(QStringLiteral("scoreboard"));
+	check(session.phase() == FffPhase::Revealed && session.displayMode() == QLatin1String("scoreboard"),
+	      "and puts the other one up");
+
 	panel.hideButton()->click();
 	check(session.phase() == FffPhase::Collecting && !panel.hideButton()->isEnabled() &&
 		      panel.banner()->property("fffState").toString() == QLatin1String("blank"),
@@ -114,6 +131,21 @@ static void testLivePanel(FffSession &session, FffHttpServer &server)
 	answer = true;
 	panel.newRoundButton()->click();
 	check(session.round() == 2 && session.votedCount() == 0, "a confirmed new round clears the votes");
+
+	// The confirmation belongs to the button. A hotkey has no dialog to
+	// answer, so it passes false and the round goes at once.
+	check(session.setVote(QStringLiteral("a"), FffVote::Green), "vote again before the unconfirmed round");
+	asked.clear();
+	answer = false;
+	panel.startNewRound(false);
+	check(asked.isEmpty() && session.round() == 3 && session.votedCount() == 0,
+	      "a new round without confirmation asks nothing and still clears the votes");
+	panel.startNewRound(true);
+	check(asked == QStringList{QStringLiteral("เริ่มรอบใหม่")} && session.round() == 3,
+	      "the same action still asks when the caller wants it to, and can be declined");
+	answer = true;
+	panel.startNewRound(true);
+	check(session.round() == 4, "a confirmed round goes through the same path");
 
 	server.stop();
 	check(panel.banner()->property("fffState").toString() == QLatin1String("serverOff") &&

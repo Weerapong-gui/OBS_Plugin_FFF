@@ -100,14 +100,11 @@ FffLivePanel::FffLivePanel(FffSession *session, FffHttpServer *server, QWidget *
 			refresh();
 		}
 	});
-	connect(m_scoreboard, &QPushButton::clicked, this, [this]() { pressMode(QStringLiteral("scoreboard")); });
-	connect(m_bottomBar, &QPushButton::clicked, this, [this]() { pressMode(QStringLiteral("bottomBar")); });
-	connect(m_hide, &QPushButton::clicked, this, [this]() {
-		if (!m_session->hideDisplay())
-			showError(fffSaveErrorText());
-		refresh();
-	});
-	connect(m_newRound, &QPushButton::clicked, this, [this]() { startNewRound(); });
+	connect(m_scoreboard, &QPushButton::clicked, this, [this]() { toggleMode(QStringLiteral("scoreboard")); });
+	connect(m_bottomBar, &QPushButton::clicked, this, [this]() { toggleMode(QStringLiteral("bottomBar")); });
+	connect(m_hide, &QPushButton::clicked, this, [this]() { hideScreen(); });
+	// The button asks first; the hotkey that reaches the same action does not.
+	connect(m_newRound, &QPushButton::clicked, this, [this]() { startNewRound(true); });
 	connect(m_session, &FffSession::changed, this, [this]() {
 		showError(QString());
 		refresh();
@@ -204,7 +201,7 @@ void FffLivePanel::pressRound(int round)
 	refresh();
 }
 
-void FffLivePanel::pressMode(const QString &mode)
+void FffLivePanel::toggleMode(const QString &mode)
 {
 	// Each mode button is a toggle: the mode on air comes down, the other one
 	// goes straight up. ■ ซ่อนจอ still blanks whatever is showing.
@@ -215,16 +212,25 @@ void FffLivePanel::pressMode(const QString &mode)
 	refresh();
 }
 
-void FffLivePanel::startNewRound()
+void FffLivePanel::hideScreen()
 {
-	const int round = m_session->round();
-	const QString text = QStringLiteral("ล้างผลโหวตรอบ %1 (โหวตแล้ว %2 คน) แล้วขึ้นรอบ %3 จอสตรีมจะว่าง\n"
-					    "รายชื่อ PNG และ PIN ยังอยู่ครบ")
-				     .arg(round)
-				     .arg(m_session->votedCount())
-				     .arg(round + 1);
-	if (!fffConfirm(this, QStringLiteral("เริ่มรอบใหม่"), text, QStringLiteral("เริ่มรอบใหม่")))
-		return;
+	if (!m_session->hideDisplay())
+		showError(fffSaveErrorText());
+	refresh();
+}
+
+void FffLivePanel::startNewRound(bool confirm)
+{
+	if (confirm) {
+		const int round = m_session->round();
+		const QString text = QStringLiteral("ล้างผลโหวตรอบ %1 (โหวตแล้ว %2 คน) แล้วขึ้นรอบ %3 จอสตรีมจะว่าง\n"
+						    "รายชื่อ PNG และ PIN ยังอยู่ครบ")
+					     .arg(round)
+					     .arg(m_session->votedCount())
+					     .arg(round + 1);
+		if (!fffConfirm(this, QStringLiteral("เริ่มรอบใหม่"), text, QStringLiteral("เริ่มรอบใหม่")))
+			return;
+	}
 	if (!m_session->clearRound())
 		showError(fffSaveErrorText());
 	refresh();

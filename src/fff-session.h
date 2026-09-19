@@ -185,6 +185,10 @@ public:
 	// Writes PNG bytes into the cards directory and returns the stored name.
 	// Shared by the dock's file picker and the monitor's upload.
 	QString storeAsset(const QByteArray &png, const QString &kind);
+	// Where this plugin keeps everything of its own on this machine. Public
+	// because the hotkey bindings live beside session.json and there must be
+	// exactly one answer to where that is.
+	QString configDir() const;
 
 signals:
 	void changed();
@@ -194,7 +198,6 @@ signals:
 	void monitorAccessChanged();
 
 private:
-	QString configDir() const;
 	// Copies the session this plugin ships with into place, once, on a machine
 	// that has none of its own.
 	void seedFromBundle() const;
