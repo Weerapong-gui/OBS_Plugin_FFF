@@ -308,7 +308,7 @@ async function main() {
       assert.match(await page.$eval("#" + id, (el) => el.title), /เครื่องที่รัน OBS/);
     }
     capabilityOnAir = true;
-    state.phase = "collecting"; push();
+    state.phase = "collecting"; state.displayMode = "scoreboard"; push();
     await page.reload({ waitUntil: "load" });
     console.log("PASS: the on-air buttons toggle, confirm twice and grey for a LAN operator");
 
