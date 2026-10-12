@@ -2,7 +2,7 @@
 
 Plugin ของสโมสรนักศึกษา มฟล. สร้างจาก [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate)
 
-มีอะไรข้างใน (v0.3.0):
+มีอะไรข้างใน (v0.5.0):
 - **FFF Flag Board** — dock คุมกระดานผลการออกธงของนายกแต่ละสำนักวิชา คนดูกดสีธงจากมือถือ ผลขึ้นจอสตรีมผ่าน Browser Source: เมนู Docks → FFF Flag Board
 - **FFF Tint** — video filter ย้อมสีภาพ (ตัวอย่างโครง filter): คลิกขวาที่ source → Filters → + → FFF Tint
 
@@ -61,7 +61,7 @@ sudo apt update && sudo apt install obs-studio
 เปิด OBS → Help → Log Files → View Current Log ต้องเจอ:
 
 ```
-[fff-tools] plugin loaded successfully (version 0.3.0)
+[fff-tools] plugin loaded successfully (version 0.5.0)
 [fff-tools] flag board listening on port 9779
 ```
 
@@ -223,7 +223,7 @@ cmake --preset macos
 แล้วปิด-เปิด OBS ใหม่ ดูใน log (Help → Log Files → View Current Log) ต้องเจอ:
 
 ```
-[fff-tools] plugin loaded successfully (version 0.3.0)
+[fff-tools] plugin loaded successfully (version 0.5.0)
 [fff-tools] flag board listening on port 9779
 ```
 
